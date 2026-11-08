@@ -42,11 +42,16 @@ import tempfile
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+FROZEN = getattr(sys, "frozen", False)
+# 资源目录：exe 打包后从 _MEIPASS 读 ytdlp_lib / ffmpeg；源码运行 = 脚本目录
+RESOURCE_DIR = getattr(sys, "_MEIPASS", HERE)
+# 数据目录：exe 打包后写 exe 旁边（可写）；源码运行 = 脚本目录
+DATA_DIR = os.path.dirname(sys.executable) if FROZEN else HERE
 ROOT = os.path.dirname(HERE)  # 上级目录
 
-CONFIG_FILE = os.path.join(HERE, "config.json")
-DEFAULT_HISTORY_FILE = os.path.join(HERE, "download_history.log")
-DEFAULT_FAILED_FILE = os.path.join(HERE, "failed_downloads.txt")
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+DEFAULT_HISTORY_FILE = os.path.join(DATA_DIR, "download_history.log")
+DEFAULT_FAILED_FILE = os.path.join(DATA_DIR, "failed_downloads.txt")
 DEFAULT_RETRIES = 3
 
 # 视为「已含扩展名」的音视频后缀，命中则文件名原样不补 .mp4
@@ -60,7 +65,10 @@ def _find_ffmpeg_dir():
     env = os.environ.get("FFMPEG_LOCATION")
     if env and os.path.isdir(env):
         return env
-    for base in (HERE, ROOT):
+    bases = [RESOURCE_DIR, DATA_DIR]
+    if not FROZEN:
+        bases.append(ROOT)
+    for base in dict.fromkeys(bases):
         hits = sorted(glob.glob(os.path.join(base, "ffmpeg*", "bin")))
         if hits:
             return hits[0]
@@ -75,7 +83,10 @@ def _setup_ytdlp():
     except ImportError:
         pass
     # 2) 本地 lib
-    for base in (HERE, ROOT):
+    bases = [RESOURCE_DIR, DATA_DIR]
+    if not FROZEN:
+        bases.append(ROOT)
+    for base in dict.fromkeys(bases):
         lib = os.path.join(base, "ytdlp_lib")
         if os.path.isdir(lib):
             sys.path.insert(0, lib)
