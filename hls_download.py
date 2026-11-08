@@ -416,7 +416,12 @@ def main():
     history_enabled = bool(config.get("history", True)) and not args.no_history
 
     # 重试次数：命令行 > config.json > 默认 3
-    retries = args.retries if args.retries is not None else int(config.get("retries", DEFAULT_RETRIES))
+    retries = args.retries
+    if retries is None:
+        try:
+            retries = int(config.get("retries", DEFAULT_RETRIES))
+        except (TypeError, ValueError):
+            sys.exit("错误：config.json 的 retries 必须是整数（如 3），当前值无效。")
     if retries < 0:
         sys.exit("错误：--retries 不能为负数。")
 
@@ -490,10 +495,15 @@ def main():
             failed_file = None
             if pending:
                 failed_file = DEFAULT_FAILED_FILE
-                _write_failed_list(failed_file, pending)
+                if not _write_failed_list(failed_file, pending):
+                    failed_file = None
             if fail:
-                print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
-                      f"（详见 {failed_file}）。")
+                if failed_file:
+                    print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
+                          f"（详见 {failed_file}）。")
+                else:
+                    print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
+                          f"（失败清单写入失败）。")
             else:
                 print(f"批量下载完成：成功 {ok} 条，失败 0 条。")
         else:
