@@ -31,19 +31,39 @@ python hls_download.py "<网页链接 或 .m3u8 直链>" [输出目录]
 :: 网页链接（推荐，标题最准）
 python hls_download.py "https://www.example.com/video/xxx" "D:\下载"
 
-:: m3u8 直链
-python hls_download.py "https://cdn.example.com/hls/xxx.m3u8"
+:: m3u8 直链（URL 含 & 时必须加引号）
+python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 ```
 
 输出：`<标题> [<id>].mp4`（省略输出目录时默认落到 `downloads/`）。
+
+## 可选参数（防盗链 / 登录态 / 代理）
+
+| 参数 | 作用 |
+|------|------|
+| `--cookies <文件>` | 读 cookies.txt（浏览器过验证后导出） |
+| `-b, --browser <名>` | 从浏览器读 cookie（chrome / firefox / edge） |
+| `--ua, --user-agent <串>` | 覆盖 User-Agent |
+| `-r, --referer <url>` | 防盗链 Referer |
+| `--proxy <url>` | 代理，如 `http://127.0.0.1:7890` |
+
+完整映射与示例见 [参数对照.md](参数对照.md)。
+
+```bat
+:: 带 cookie + UA + Referer + 代理
+python hls_download.py "https://cdn.example.com/hls/xxx.m3u8" ^
+  --cookies cookies.txt --ua "Mozilla/5.0 ..." -r "https://www.example.com/" --proxy "http://127.0.0.1:7890"
+```
 
 ## 目录结构
 
 ```
 hls-downloader/
-├── hls_download.py     # 主脚本（yt-dlp 封装）
-├── 下载指南.md          # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
-├── examples/           # 纯 Python 手动 AES-128 解密示例（教学用，不依赖 yt-dlp）
+├── hls_download.py      # 主脚本（yt-dlp 封装）
+├── 参数对照.md           # 参数 ↔ yt-dlp 映射 + 示例
+├── config.example.json  # 配置示例（当前脚本尚未读取，供后续扩展参考）
+├── 下载指南.md           # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
+├── examples/            # 纯 Python 手动 AES-128 解密示例（教学用，不依赖 yt-dlp）
 │   ├── download_video.py
 │   └── refill.py
 └── README.md

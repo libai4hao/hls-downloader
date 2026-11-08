@@ -1,0 +1,9 @@
+{
+  "_说明": "config.json 的示例模板。注意：当前 hls_download.py 尚未读取此文件，本示例仅供后续扩展配置读取时参考；所有值仍以命令行参数为准。",
+  "out_dir": "downloads",
+  "cookies": "cookies.txt",
+  "browser": "firefox",
+  "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+  "referer": "https://www.example.com/",
+  "proxy": "http://127.0.0.1:7890"
+}

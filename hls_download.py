@@ -10,10 +10,18 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
 用法：
     python hls_download.py "<网页链接 或 视频直链m3u8 链接>" [输出目录]
 
+可选参数（防盗链 / 登录态 / 代理）：
+    --cookies <文件>       读取 cookies.txt（浏览器过验证后导出）
+    -b, --browser <名>     从浏览器读 cookie（chrome / firefox / edge）
+    --ua, --user-agent <串> 覆盖 User-Agent
+    -r, --referer <url>    防盗链 Referer
+    --proxy <url>          代理，如 http://127.0.0.1:7890
+
 依赖定位（按优先级）：
     yt-dlp ：优先系统已安装，否则用脚本同目录 / 上级目录下的 ytdlp_lib/
     ffmpeg ：优先环境变量 FFMPEG_LOCATION，否则用脚本同目录 / 上级目录下的 ffmpeg*/bin/
 """
+import argparse
 import glob
 import os
 import sys
@@ -49,10 +57,34 @@ def _setup_ytdlp():
     sys.exit("错误：找不到 yt_dlp。请安装 yt-dlp，或把 ytdlp_lib 放到脚本同目录/上级目录。")
 
 
+def _parse_args():
+    parser = argparse.ArgumentParser(
+        description="加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument("url", help="网页链接 或 视频直链(m3u8)链接")
+    parser.add_argument(
+        "out_dir", nargs="?", default=None,
+        help="输出目录，默认脚本同目录下 downloads/",
+    )
+
+    # 登录态 / 反爬（二选一）
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--cookies", metavar="文件", help="读取 cookies.txt（浏览器过验证后导出）")
+    group.add_argument("-b", "--browser", metavar="名称",
+                       help="从浏览器读 cookie（如 chrome / firefox / edge）")
+
+    # 防盗链
+    parser.add_argument("--ua", "--user-agent", dest="user_agent", metavar="串",
+                        help="覆盖 User-Agent")
+    parser.add_argument("-r", "--referer", metavar="URL", help="防盗链 Referer")
+    parser.add_argument("--proxy", metavar="URL", help="代理，如 http://127.0.0.1:7890")
+
+    return parser.parse_args()
+
+
 def main():
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(2)
+    args = _parse_args()
 
     _setup_ytdlp()
     import yt_dlp  # noqa: E402
@@ -61,8 +93,7 @@ def main():
     if not ffmpeg_dir:
         sys.exit("错误：找不到 ffmpeg。请安装 ffmpeg 或设置环境变量 FFMPEG_LOCATION。")
 
-    url = sys.argv[1]
-    out_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "downloads")
+    out_dir = args.out_dir if args.out_dir else os.path.join(HERE, "downloads")
     os.makedirs(out_dir, exist_ok=True)
 
     # 标题保留：网页链接用源标题；m3u8 直链无标题时回退到 id
@@ -81,8 +112,27 @@ def main():
         "fragment_retries": 10,
     }
 
+    # 登录态
+    if args.cookies:
+        ydl_opts["cookiefile"] = args.cookies
+    if args.browser:
+        ydl_opts["cookiesfrombrowser"] = (args.browser,)
+
+    # 防盗链 / 覆盖 UA
+    headers = {}
+    if args.user_agent:
+        headers["User-Agent"] = args.user_agent
+    if args.referer:
+        headers["Referer"] = args.referer
+    if headers:
+        ydl_opts["http_headers"] = headers
+
+    # 代理
+    if args.proxy:
+        ydl_opts["proxy"] = args.proxy
+
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
+        info = ydl.extract_info(url=args.url, download=True)
         if info and "requested_downloads" in info:
             for d in info["requested_downloads"]:
                 print("已下载:", d.get("filepath") or d.get("filename"))
