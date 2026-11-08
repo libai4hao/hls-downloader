@@ -95,9 +95,6 @@ class App:
         if f:
             self.cookie_var.set(f)
 
-    def _log(self, msg):
-        self.q.put(msg)
-
     def _poll_queue(self):
         """主线程统一消费队列：str=日志，__status__=状态栏，__error__=弹框。"""
         try:
@@ -198,6 +195,7 @@ class App:
 
             try:
                 if is_batch:
+                    # 批量：复用 h._run_batch，带回重试 + 失败清单；stop_evt 支持停止后续条目
                     items = []
                     for ln in lines:
                         parts = ln.split(None, 1)
@@ -205,26 +203,21 @@ class App:
                         nm = parts[1].strip() if len(parts) > 1 else None
                         items.append((url, nm))
                     total = len(items)
-                    ok = 0
-                    for i, (url, nm) in enumerate(items, 1):
-                        if self.stop_evt.is_set():
-                            log("已停止。")
-                            break
-                        self.q.put(("__status__", f"下载中 {i}/{total}"))
-                        # 批量：逐条走 _run_single 以支持逐条停止
-                        err = h._run_single(url, nm, ydl_opts, out_dir, history_enabled,
-                                            history_file, False, retries, log=log)
-                        if err is not None:
-                            log(f"失败：{url}（{err}）")
-                        else:
-                            ok += 1
-                    self.q.put(("__status__",
-                                f"已完成（批量）：成功 {ok}/{total}" if not self.stop_evt.is_set()
-                                else "已停止"))
+                    self.q.put(("__status__", f"下载中 1/{total}"))
+                    ok, fail_count, failed_file = h._run_batch(
+                        items, ydl_opts, out_dir, history_enabled, history_file,
+                        False, retries, log=log, stop_evt=self.stop_evt)
+                    if self.stop_evt.is_set():
+                        self.q.put(("__status__", "已停止"))
+                    elif fail_count:
+                        self.q.put(("__status__", f"已完成（批量）：成功 {ok}/{total}，失败 {fail_count}"))
+                    else:
+                        self.q.put(("__status__", f"已完成（批量）：成功 {ok}/{total}"))
                 else:
                     self.q.put(("__status__", "下载中…"))
                     err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
-                                        history_file, False, retries, log=log)
+                                        history_file, False, retries, log=log,
+                                        stop_evt=self.stop_evt)
                     if err is not None:
                         log(f"失败：{err}")
                         self.q.put(("__status__", "失败"))

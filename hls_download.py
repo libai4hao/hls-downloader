@@ -232,18 +232,22 @@ def _write_failed_list(path, items):
     return True
 
 
-def _retry_pending(download_one, pending, retries):
+def _retry_pending(download_one, pending, retries, stop_evt=None):
     """队列式重试：对 pending 里的条目做最多 retries 轮，成功移出队列。
 
     download_one 签名为 (url, name) -> error（None 表示成功）。
+    stop_evt 可选：置位后立即停止后续重试（未重试的条目原样保留）。
     返回 (ok 增加数, 最终仍失败的 items)。
     """
     ok = 0
     for _ in range(retries):
-        if not pending:
+        if not pending or (stop_evt is not None and stop_evt.is_set()):
             break
         still = []
         for url, name in pending:
+            if stop_evt is not None and stop_evt.is_set():
+                still.append((url, name))
+                continue
             err = download_one(url, name)
             if err is None:
                 ok += 1
@@ -391,28 +395,38 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
     return entry, error
 
 
-def _run_single(url, name, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print):
-    """单条下载，失败后额外重试 retries 次。返回 error（None 表示成功）。"""
+def _run_single(url, name, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print, stop_evt=None):
+    """单条下载，失败后额外重试 retries 次。返回 error（None 表示成功）。
+
+    stop_evt 可选：置位后停止后续重试。
+    """
     def _dl(u, n):
         return _download_one(u, ydl_opts, out_dir, history_enabled,
                              history_file, overwrite, n, log=log)[1]
     err = _dl(url, name)
     attempt = 1
     while err is not None and attempt <= retries:
+        if stop_evt is not None and stop_evt.is_set():
+            break
         attempt += 1
         log(f"第 {attempt - 1} 次重试: {url}")
         err = _dl(url, name)
     return err
 
 
-def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print):
-    """批量下载：第一轮全跑 → 失败进队列重试 → 耗尽写失败清单。返回 (ok, fail, failed_file)。"""
+def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print, stop_evt=None):
+    """批量下载：第一轮全跑 → 失败进队列重试 → 耗尽写失败清单。返回 (ok, fail, failed_file)。
+
+    stop_evt 可选：置位后停止后续条目与后续重试。
+    """
     def _dl(u, n):
         return _download_one(u, ydl_opts, out_dir, history_enabled,
                              history_file, overwrite, n, log=log)[1]
     ok = fail = 0
     pending = []
     for i, (url, name) in enumerate(items, 1):
+        if stop_evt is not None and stop_evt.is_set():
+            break  # 停止：剩余条目不下载、不记失败
         log(f"[{i}/{len(items)}] 下载中: {url}")
         err = _dl(url, name)
         if err is None:
@@ -422,7 +436,7 @@ def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrit
             log(f"    失败：{url}（{err}）")
     if pending and retries > 0:
         log(f"重试失败条目（最多 {retries} 轮）…")
-        gained, pending = _retry_pending(_dl, pending, retries)
+        gained, pending = _retry_pending(_dl, pending, retries, stop_evt)
         ok += gained
     fail = len(pending)
     failed_file = None
