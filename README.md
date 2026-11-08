@@ -92,7 +92,7 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 
 ## 打包（可选）
 
-用 PyInstaller 打成**自包含目录（onedir）**，双击 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
+用 PyInstaller 打成**单文件（onefile）**，双击 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
 
 ```bat
 :: 在 .venv_build 虚拟环境里装 pyinstaller 后执行
@@ -101,12 +101,12 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 ```
 
 产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
-- `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口）
-- `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
+- `dist\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
+- `dist\hls_download_gui.exe` — GUI 版（无控制台）
 
 > ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
-> 打包后数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁，只读资源（yt-dlp / ffmpeg）在 `_internal/`。
+> 单文件 exe 首次运行会解压到系统临时目录（解压需要十几秒），之后正常启动；数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁。
 
 ## 目录结构
 
@@ -115,8 +115,8 @@ hls-downloader/
 ├── hls_download.py      # 主脚本（CLI 入口 + 下载核心函数）
 ├── gui.py               # tkinter 图形界面（复用 hls_download）
 ├── config.example.json  # 配置示例（复制为 config.json 生效）
-├── build_cli.spec       # PyInstaller 打包 CLI（onedir）
-├── build_gui.spec       # PyInstaller 打包 GUI（onedir）
+├── build_cli.spec       # PyInstaller 打包 CLI（单文件 onefile）
+├── build_gui.spec       # PyInstaller 打包 GUI（单文件 onefile）
 ├── doc/                 # 文档目录
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）
 │   ├── 代码地图.md       # 代码地图（文件导航 + 关键代码行号）

@@ -1,4 +1,4 @@
-# build_cli.spec — hls_download 的 CLI 打包（onedir 目录分发，沙箱/低完整性环境可用）
+# build_cli.spec — hls_download 的 CLI 打包（单文件 onefile，点击即用）
 import shutil
 import sys
 from pathlib import Path
@@ -44,8 +44,9 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.datas,
     [],
-    exclude_binaries=True,
     name="hls_download",
     debug=False,
     bootloader_ignore_signals=False,
@@ -53,15 +54,6 @@ exe = EXE(
     upx=False,
     console=True,
     disable_windowed_traceback=False,
-)
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=False,
-    name="hls_download",
 )
 
 # 打包完成后清理 PyInstaller 中间产物目录 build/（只留 dist/ 成品）

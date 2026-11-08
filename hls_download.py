@@ -9,6 +9,7 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
 
 用法：
     python hls_download.py "<网页链接 或 视频直链m3u8 链接>" [输出目录]
+    python hls_download.py                # 无参数：进入交互式引导（双击 exe 即用）
 
 可选参数（防盗链 / 登录态 / 代理 / 历史记录 / 文件名 / 批量）：
     --cookies <文件>       读取 cookies 文件（Netscape cookies.txt 或 Cookie-Editor 的 JSON 导出，自动识别）
@@ -111,7 +112,7 @@ def _resolve_path(value, default):
     """把配置/命令行里的路径统一成绝对路径；相对路径以脚本目录为基准。"""
     if not value:
         return default
-    # frozen(onedir) 下相对路径以 exe 所在目录(DATA_DIR)为基准；源码运行 DATA_DIR==HERE
+    # frozen(onefile) 下相对路径以 exe 所在目录(DATA_DIR)为基准；源码运行 DATA_DIR==HERE
     return value if os.path.isabs(value) else os.path.join(DATA_DIR, value)
 
 
@@ -454,6 +455,27 @@ def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrit
     return ok, fail, failed_file
 
 
+def _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retries):
+    """无参数双击时的交互式引导：逐条输入链接下载，直接回车退出。"""
+    print("=" * 60)
+    print("HLS 视频下载器（交互模式）")
+    print(f"输出目录：{out_dir}")
+    print("输入视频链接开始下载；直接回车退出。")
+    print("=" * 60)
+    while True:
+        url = input("\n视频链接 > ").strip()
+        if not url:
+            print("已退出。")
+            return
+        name = input("文件名（回车自动命名）> ").strip() or None
+        err = _run_single(url, name, ydl_opts, out_dir, history_enabled,
+                          history_file, False, retries)
+        if err is not None:
+            print(f"下载失败：{err}")
+        else:
+            print("下载成功。")
+
+
 def main():
     args = _parse_args()
     config = _load_config()
@@ -502,14 +524,6 @@ def main():
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # 参数互斥校验
-    if args.batch and args.url:
-        sys.exit("错误：url 与 --batch 不能同时使用。")
-    if args.batch and args.output:
-        sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
-    if not args.batch and not args.url:
-        sys.exit("错误：请提供 url，或使用 --batch 指定批量下载文件。")
-
     ydl_opts = {
         "ffmpeg_location": ffmpeg_dir,
         # m3u8 单流(HLS 多为音视频混合 TS)用 best 最稳
@@ -540,6 +554,16 @@ def main():
     # 代理
     if proxy:
         ydl_opts["proxy"] = proxy
+
+    # 参数互斥校验
+    if args.batch and args.url:
+        sys.exit("错误：url 与 --batch 不能同时使用。")
+    if args.batch and args.output:
+        sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
+    if not args.batch and not args.url:
+        # 无参数双击：进入交互式引导，而非报错闪退
+        _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retries)
+        return
 
     try:
         if args.batch:
