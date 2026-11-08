@@ -100,10 +100,12 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 .venv_build\Scripts\pyinstaller --clean --noconfirm build_gui.spec
 ```
 
-产物：
+产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
 - `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口）
 - `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
 
+> ⚠️ 运行 `dist\` 下的 exe。`build\` 是 PyInstaller 的中间产物，那里的 exe 是 bootloader 骨架，旁边没有 `_internal\`，双击会闪退/报 `Failed to load Python DLL`。
+>
 > 打包后数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁，只读资源（yt-dlp / ffmpeg）在 `_internal/`。
 
 ## 目录结构
