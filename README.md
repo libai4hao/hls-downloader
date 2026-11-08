@@ -43,6 +43,14 @@ python hls_download.py --batch urls.txt
 
 输出：`<标题> [<id>].mp4`（省略输出目录时默认落到 `downloads/`）。同名文件默认加序号 `名称 (1).mp4`，加 `--overwrite` 直接覆盖。
 
+## 图形界面（GUI）
+
+```bat
+python gui.py
+```
+
+tkinter 图形界面（标准库自带，无需额外依赖），支持核心下载 + 批量 + 代理；链接框填多行自动按批量逐条下载，下载在后台线程跑、日志实时回显，不冻结界面。
+
 ## 可选参数（防盗链 / 登录态 / 代理 / 文件名 / 批量 / 历史记录）
 
 | 参数 | 作用 |
@@ -82,12 +90,31 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 - **失败清单**：批量下载重试耗尽后仍失败的条目写入 `failed_downloads.txt`（脚本同目录，每行 `URL [文件名]`，可直接回喂 `--batch` 补下）。
 - 功能规划见 [doc/功能清单.md](doc/功能清单.md)、[doc/迭代计划.md](doc/迭代计划.md)。
 
+## 打包（可选）
+
+用 PyInstaller 打成**自包含目录（onedir）**，双击 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
+
+```bat
+:: 在 .venv_build 虚拟环境里装 pyinstaller 后执行
+.venv_build\Scripts\pyinstaller --clean --noconfirm build_cli.spec
+.venv_build\Scripts\pyinstaller --clean --noconfirm build_gui.spec
+```
+
+产物：
+- `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口）
+- `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
+
+> 打包后数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁，只读资源（yt-dlp / ffmpeg）在 `_internal/`。
+
 ## 目录结构
 
 ```
 hls-downloader/
-├── hls_download.py      # 主脚本（yt-dlp 封装）
+├── hls_download.py      # 主脚本（CLI 入口 + 下载核心函数）
+├── gui.py               # tkinter 图形界面（复用 hls_download）
 ├── config.example.json  # 配置示例（复制为 config.json 生效）
+├── build_cli.spec       # PyInstaller 打包 CLI（onedir）
+├── build_gui.spec       # PyInstaller 打包 GUI（onedir）
 ├── doc/                 # 文档目录
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）
 │   ├── 代码地图.md       # 代码地图（文件导航 + 关键代码行号）
@@ -95,7 +122,9 @@ hls-downloader/
 │   ├── 迭代计划.md       # 版本路线与优先级
 │   ├── 参数对照.md       # 参数 ↔ yt-dlp 映射 + 示例
 │   ├── 下载指南.md       # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
-│   └── cookies导出指南.md # cookies.txt 导出（登录态 / 过 Cloudflare 验证站点的首选方案）
+│   ├── cookies导出指南.md # cookies.txt 导出（登录态 / 过 Cloudflare 验证站点的首选方案）
+│   ├── GUI设计.md        # GUI 技术选型与设计
+│   └── GUI实现计划.md    # GUI 分步实现计划
 ├── examples/            # 纯 Python 手动 AES-128 解密示例（教学用，不依赖 yt-dlp）
 │   ├── download_video.py
 │   └── refill.py
