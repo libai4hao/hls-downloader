@@ -33,11 +33,17 @@ python hls_download.py "https://www.example.com/video/xxx" "D:\下载"
 
 :: m3u8 直链（URL 含 & 时必须加引号）
 python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
+
+:: 指定输出文件名（自动补 .mp4）
+python hls_download.py "https://www.example.com/video/xxx" -o 我的视频
+
+:: 批量下载（urls.txt 每行 "URL [文件名]"，# 注释与空行忽略）
+python hls_download.py --batch urls.txt
 ```
 
-输出：`<标题> [<id>].mp4`（省略输出目录时默认落到 `downloads/`）。
+输出：`<标题> [<id>].mp4`（省略输出目录时默认落到 `downloads/`）。同名文件默认加序号 `名称 (1).mp4`，加 `--overwrite` 直接覆盖。
 
-## 可选参数（防盗链 / 登录态 / 代理 / 历史记录）
+## 可选参数（防盗链 / 登录态 / 代理 / 文件名 / 批量 / 历史记录）
 
 | 参数 | 作用 |
 |------|------|
@@ -46,6 +52,9 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 | `--ua, --user-agent <串>` | 覆盖 User-Agent |
 | `-r, --referer <url>` | 防盗链 Referer |
 | `--proxy <url>` | 代理，如 `http://127.0.0.1:7890` |
+| `-o, --output <文件名>` | 固定输出文件名（不含扩展名自动补 `.mp4`，已含扩展名则原样） |
+| `--overwrite` | 同名文件直接覆盖（默认加序号 `名称 (1).mp4`） |
+| `--batch <文件>` | 批量下载，每行 `URL [文件名]`，`#` 注释与空行忽略 |
 | `--no-history` | 本次下载不写入下载历史记录 |
 | `--history-file <文件>` | 下载历史文件路径，默认脚本同目录 `download_history.log` |
 
@@ -60,6 +69,9 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 :: 带 cookie + UA + Referer + 代理
 python hls_download.py "https://cdn.example.com/hls/xxx.m3u8" ^
   --cookies cookies.txt --ua "Mozilla/5.0 ..." -r "https://www.example.com/" --proxy "http://127.0.0.1:7890"
+
+:: 批量下载 + 覆盖 UA / 代理
+python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://127.0.0.1:7890"
 ```
 
 ## 配置与下载历史

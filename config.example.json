@@ -7,6 +7,7 @@
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
   "referer": "https://www.example.com/",
   "proxy": "http://127.0.0.1:7890",
+  "_注意2": "output / overwrite / batch 仅命令行可用（不读 config）：-o 固定文件名、--overwrite 覆盖同名、--batch 批量下载。",
   "history": true,
   "history_file": "download_history.log"
 }

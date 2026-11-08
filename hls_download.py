@@ -10,12 +10,15 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
 用法：
     python hls_download.py "<网页链接 或 视频直链m3u8 链接>" [输出目录]
 
-可选参数（防盗链 / 登录态 / 代理 / 历史记录）：
+可选参数（防盗链 / 登录态 / 代理 / 历史记录 / 文件名 / 批量）：
     --cookies <文件>       读取 cookies 文件（Netscape cookies.txt 或 Cookie-Editor 的 JSON 导出，自动识别）
     -b, --browser <名>     从浏览器读 cookie（chrome / firefox / edge）
     --ua, --user-agent <串> 覆盖 User-Agent
     -r, --referer <url>    防盗链 Referer
     --proxy <url>          代理，如 http://127.0.0.1:7890
+    -o, --output <文件名>  固定输出文件名（不含扩展名时自动补 .mp4，已含扩展名则原样）
+    --overwrite            同名文件直接覆盖（默认加序号，如 名称 (1).mp4）
+    --batch <文件>         批量下载，每行 "URL [文件名]"，# 注释行与空行忽略
     --no-history           本次下载不写入下载历史记录
     --history-file <文件>  下载历史文件路径，默认脚本同目录 download_history.log
 
@@ -32,6 +35,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 from datetime import datetime
@@ -41,6 +45,12 @@ ROOT = os.path.dirname(HERE)  # 上级目录
 
 CONFIG_FILE = os.path.join(HERE, "config.json")
 DEFAULT_HISTORY_FILE = os.path.join(HERE, "download_history.log")
+
+# 视为「已含扩展名」的音视频后缀，命中则文件名原样不补 .mp4
+_VIDEO_EXTS = (
+    ".mp4", ".mkv", ".ts", ".mov", ".flv", ".webm", ".avi",
+    ".mp3", ".m4a", ".aac", ".wav", ".m3u8",
+)
 
 
 def _find_ffmpeg_dir():
@@ -137,6 +147,63 @@ def _convert_json_cookies(src):
     return tmp
 
 
+def _ensure_ext(name):
+    """把用户指定的文件名补全扩展名：已含常见音视频后缀则原样，否则补 .mp4。"""
+    name = (name or "").strip()
+    if not name:
+        return None
+    if any(name.lower().endswith(e) for e in _VIDEO_EXTS):
+        return name
+    return name + ".mp4"
+
+
+def _move_to_final(src, out_dir, overwrite):
+    """把 staging 里的成品文件移到 out_dir。
+
+    同名时默认加序号（名称 (1).mp4、(2)…）；--overwrite 时直接覆盖。
+    返回最终落盘路径。
+    """
+    basename = os.path.basename(src)
+    dst = os.path.join(out_dir, basename)
+    if overwrite:
+        existed = os.path.exists(dst)
+        os.replace(src, dst)
+        if existed:
+            print(f"提示：{basename} 已存在，已覆盖")
+        return dst
+    if not os.path.exists(dst):
+        os.replace(src, dst)
+        return dst
+    root, ext = os.path.splitext(basename)
+    i = 1
+    while True:
+        cand = f"{root} ({i}){ext}"
+        cand_path = os.path.join(out_dir, cand)
+        if not os.path.exists(cand_path):
+            os.replace(src, cand_path)
+            print(f"提示：{basename} 已存在，改存为 {cand}")
+            return cand_path
+        i += 1
+
+
+def _read_batch_file(path):
+    """读批量下载文件：每行 "URL [文件名]"，# 注释行与空行忽略。
+
+    返回 [(url, 文件名或 None), ...]。
+    """
+    items = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            url = parts[0]
+            name = parts[1].strip() if len(parts) > 1 else None
+            items.append((url, name))
+    return items
+
+
 def _format_history_line(entry):
     """把一条历史记录格式化成一行可读文本（log 格式）。"""
     status = entry.get("status", "?")
@@ -164,7 +231,8 @@ def _parse_args():
         description="加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("url", help="网页链接 或 视频直链(m3u8)链接")
+    parser.add_argument("url", nargs="?", default=None,
+                        help="网页链接 或 视频直链(m3u8)链接（与 --batch 二选一）")
     parser.add_argument(
         "out_dir", nargs="?", default=None,
         help="输出目录，默认脚本同目录下 downloads/",
@@ -183,6 +251,14 @@ def _parse_args():
     parser.add_argument("-r", "--referer", metavar="URL", help="防盗链 Referer")
     parser.add_argument("--proxy", metavar="URL", help="代理，如 http://127.0.0.1:7890")
 
+    # 文件名 / 重复处理 / 批量
+    parser.add_argument("-o", "--output", metavar="文件名",
+                        help="固定输出文件名（不含扩展名时自动补 .mp4，已含扩展名则原样）")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="同名文件直接覆盖（默认加序号，如 名称 (1).mp4）")
+    parser.add_argument("--batch", metavar="文件",
+                        help="批量下载，每行 \"URL [文件名]\"，# 注释行与空行忽略")
+
     # 历史记录
     parser.add_argument("--no-history", action="store_true",
                         help="本次下载不写入下载历史记录")
@@ -192,12 +268,83 @@ def _parse_args():
     return parser.parse_args()
 
 
+def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwrite, want_name):
+    """下载单个 URL，落到 out_dir（同名加序号/覆盖）。返回 (entry, error)。
+
+    error 为 None 表示成功，否则为捕获到的异常（已写失败历史）。
+    """
+    entry = {
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "url": url,
+        "status": "success",
+        "title": None,
+        "id": None,
+        "filepath": None,
+        "out_dir": out_dir,
+    }
+
+    # 下载到同盘 staging 目录，保证 move 原子、不会留下半成品
+    staging_dir = tempfile.mkdtemp(dir=out_dir, prefix=".hls_staging_")
+    opts = dict(ydl_opts)
+    if want_name:
+        final_name = _ensure_ext(want_name)
+        opts["outtmpl"] = os.path.join(staging_dir, final_name)
+        # 用户指定了扩展名时，让 ffmpeg 转封装成对应容器
+        ext = os.path.splitext(final_name)[1].lstrip(".")
+        if ext:
+            opts["merge_output_format"] = ext
+    else:
+        opts["outtmpl"] = os.path.join(staging_dir, "%(title).180B [%(id)s].%(ext)s")
+
+    import yt_dlp  # 已由 main() 先调用 _setup_ytdlp() 保证可导入
+
+    error = None
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url=url, download=True)
+
+        final_path = None
+        downloaded = info.get("requested_downloads") if isinstance(info, dict) else None
+        if downloaded:
+            for d in downloaded:
+                src = d.get("filepath") or d.get("filename")
+                if src and os.path.isfile(src):
+                    p = _move_to_final(src, out_dir, overwrite)
+                    final_path = final_path or p
+        # 回退：拿不到 requested_downloads 时，扫 staging 里的成品文件
+        if final_path is None:
+            for fn in sorted(os.listdir(staging_dir)):
+                src = os.path.join(staging_dir, fn)
+                if os.path.isfile(src):
+                    p = _move_to_final(src, out_dir, overwrite)
+                    final_path = final_path or p
+
+        if isinstance(info, dict):
+            entry["title"] = info.get("title")
+            entry["id"] = info.get("id")
+        entry["filepath"] = final_path
+
+        if final_path:
+            print("已下载:", final_path)
+        else:
+            print("完成，输出目录:", out_dir)
+    except Exception as e:
+        entry["status"] = "failed"
+        entry["error"] = str(e)
+        error = e
+    finally:
+        if history_enabled:
+            _append_history(history_file, entry)
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+    return entry, error
+
+
 def main():
     args = _parse_args()
     config = _load_config()
 
     _setup_ytdlp()
-    import yt_dlp  # noqa: E402
 
     ffmpeg_dir = _find_ffmpeg_dir()
     if not ffmpeg_dir:
@@ -231,12 +378,16 @@ def main():
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # 标题保留：网页链接用源标题；m3u8 直链无标题时回退到 id
-    outtmpl = os.path.join(out_dir, "%(title).180B [%(id)s].%(ext)s")
+    # 参数互斥校验
+    if args.batch and args.url:
+        sys.exit("错误：url 与 --batch 不能同时使用。")
+    if args.batch and args.output:
+        sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
+    if not args.batch and not args.url:
+        sys.exit("错误：请提供 url，或使用 --batch 指定批量下载文件。")
 
     ydl_opts = {
         "ffmpeg_location": ffmpeg_dir,
-        "outtmpl": outtmpl,
         # m3u8 单流(HLS 多为音视频混合 TS)用 best 最稳
         "format": "best",
         # 下载的 TS 由 ffmpeg 转封装成 mp4
@@ -266,42 +417,27 @@ def main():
     if proxy:
         ydl_opts["proxy"] = proxy
 
-    entry = {
-        "time": datetime.now().isoformat(timespec="seconds"),
-        "url": args.url,
-        "status": "success",
-        "title": None,
-        "id": None,
-        "filepath": None,
-        "out_dir": out_dir,
-    }
-
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url=args.url, download=True)
-        filepath = None
-        if info and "requested_downloads" in info:
-            for d in info["requested_downloads"]:
-                fp = d.get("filepath") or d.get("filename")
-                if fp:
-                    print("已下载:", fp)
-                    filepath = filepath or fp
+        if args.batch:
+            items = _read_batch_file(args.batch)
+            if not items:
+                sys.exit("错误：批量文件为空或无可下载的 URL。")
+            ok = fail = 0
+            for i, (url, name) in enumerate(items, 1):
+                print(f"[{i}/{len(items)}] 下载中: {url}")
+                _, err = _download_one(url, ydl_opts, out_dir, history_enabled,
+                                       history_file, args.overwrite, name)
+                if err is None:
+                    ok += 1
+                else:
+                    fail += 1
+                    print(f"    失败：{url}（{err}）")
+            print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条。")
         else:
-            print("完成，输出目录:", out_dir)
-
-        if isinstance(info, dict):
-            entry["title"] = info.get("title")
-            entry["id"] = info.get("id")
-        entry["filepath"] = filepath
-    except Exception as e:
-        entry["status"] = "failed"
-        entry["error"] = str(e)
-        if history_enabled:
-            _append_history(history_file, entry)
-        raise
-    else:
-        if history_enabled:
-            _append_history(history_file, entry)
+            _, err = _download_one(args.url, ydl_opts, out_dir, history_enabled,
+                                   history_file, args.overwrite, args.output)
+            if err is not None:
+                raise err
     finally:
         if tmp_cookie and os.path.isfile(tmp_cookie):
             try:
