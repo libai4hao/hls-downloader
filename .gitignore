@@ -1,0 +1,23 @@
+# 下载产物
+downloads/
+*.ts
+*.mp4
+*.part
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+
+# 依赖（体积大，自行安装，不进 git）
+ytdlp_lib/
+ffmpeg*/
+N_m3u8DL-RE*/
+yt_dlp*.whl
+yt-dlp.exe
