@@ -390,6 +390,55 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
     return entry, error
 
 
+def _run_single(url, name, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print):
+    """单条下载，失败后额外重试 retries 次。返回 error（None 表示成功）。"""
+    def _dl(u, n):
+        return _download_one(u, ydl_opts, out_dir, history_enabled,
+                             history_file, overwrite, n, log=log)[1]
+    err = _dl(url, name)
+    attempt = 1
+    while err is not None and attempt <= retries:
+        attempt += 1
+        log(f"第 {attempt - 1} 次重试: {url}")
+        err = _dl(url, name)
+    return err
+
+
+def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print):
+    """批量下载：第一轮全跑 → 失败进队列重试 → 耗尽写失败清单。返回 (ok, fail, failed_file)。"""
+    def _dl(u, n):
+        return _download_one(u, ydl_opts, out_dir, history_enabled,
+                             history_file, overwrite, n, log=log)[1]
+    ok = fail = 0
+    pending = []
+    for i, (url, name) in enumerate(items, 1):
+        log(f"[{i}/{len(items)}] 下载中: {url}")
+        err = _dl(url, name)
+        if err is None:
+            ok += 1
+        else:
+            pending.append((url, name))
+            log(f"    失败：{url}（{err}）")
+    if pending and retries > 0:
+        log(f"重试失败条目（最多 {retries} 轮）…")
+        gained, pending = _retry_pending(_dl, pending, retries)
+        ok += gained
+    fail = len(pending)
+    failed_file = None
+    if pending:
+        failed_file = DEFAULT_FAILED_FILE
+        if not _write_failed_list(failed_file, pending):
+            failed_file = None
+    if fail:
+        if failed_file:
+            log(f"批量下载完成：成功 {ok} 条，失败 {fail} 条（详见 {failed_file}）。")
+        else:
+            log(f"批量下载完成：成功 {ok} 条，失败 {fail} 条（失败清单写入失败）。")
+    else:
+        log(f"批量下载完成：成功 {ok} 条，失败 0 条。")
+    return ok, fail, failed_file
+
+
 def main():
     args = _parse_args()
     config = _load_config()
@@ -477,54 +526,16 @@ def main():
     if proxy:
         ydl_opts["proxy"] = proxy
 
-    def _dl(url, name):
-        return _download_one(url, ydl_opts, out_dir, history_enabled,
-                             history_file, args.overwrite, name)[1]
-
     try:
         if args.batch:
             items = _read_batch_file(args.batch)
             if not items:
                 sys.exit("错误：批量文件为空或无可下载的 URL。")
-            ok = fail = 0
-            pending = []
-            # 第一轮：顺序跑完所有条目
-            for i, (url, name) in enumerate(items, 1):
-                print(f"[{i}/{len(items)}] 下载中: {url}")
-                err = _dl(url, name)
-                if err is None:
-                    ok += 1
-                else:
-                    pending.append((url, name))
-                    print(f"    失败：{url}（{err}）")
-            # 队列式重试：失败条目最多额外重试 retries 轮
-            if pending and retries > 0:
-                print(f"重试失败条目（最多 {retries} 轮）…")
-                gained, pending = _retry_pending(_dl, pending, retries)
-                ok += gained
-            fail = len(pending)
-            failed_file = None
-            if pending:
-                failed_file = DEFAULT_FAILED_FILE
-                if not _write_failed_list(failed_file, pending):
-                    failed_file = None
-            if fail:
-                if failed_file:
-                    print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
-                          f"（详见 {failed_file}）。")
-                else:
-                    print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
-                          f"（失败清单写入失败）。")
-            else:
-                print(f"批量下载完成：成功 {ok} 条，失败 0 条。")
+            _run_batch(items, ydl_opts, out_dir, history_enabled,
+                       history_file, args.overwrite, retries)
         else:
-            err = _dl(args.url, args.output)
-            # 单条：失败后额外重试 retries 次
-            attempt = 1
-            while err is not None and attempt <= retries:
-                attempt += 1
-                print(f"第 {attempt - 1} 次重试: {args.url}")
-                err = _dl(args.url, args.output)
+            err = _run_single(args.url, args.output, ydl_opts, out_dir,
+                              history_enabled, history_file, args.overwrite, retries)
             if err is not None:
                 raise err
     finally:
