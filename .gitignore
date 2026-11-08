@@ -4,6 +4,10 @@ downloads/
 *.mp4
 *.part
 
+# 本地配置与下载历史（含个人 cookie / 出口 IP 等隐私，不进 git）
+config.json
+download_history.log
+
 # Python 缓存
 __pycache__/
 *.pyc

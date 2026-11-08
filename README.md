@@ -37,7 +37,7 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 
 输出：`<标题> [<id>].mp4`（省略输出目录时默认落到 `downloads/`）。
 
-## 可选参数（防盗链 / 登录态 / 代理）
+## 可选参数（防盗链 / 登录态 / 代理 / 历史记录）
 
 | 参数 | 作用 |
 |------|------|
@@ -46,6 +46,8 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 | `--ua, --user-agent <串>` | 覆盖 User-Agent |
 | `-r, --referer <url>` | 防盗链 Referer |
 | `--proxy <url>` | 代理，如 `http://127.0.0.1:7890` |
+| `--no-history` | 本次下载不写入下载历史记录 |
+| `--history-file <文件>` | 下载历史文件路径，默认脚本同目录 `download_history.log` |
 
 完整映射与示例见 [参数对照.md](参数对照.md)。
 
@@ -55,13 +57,21 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8" ^
   --cookies cookies.txt --ua "Mozilla/5.0 ..." -r "https://www.example.com/" --proxy "http://127.0.0.1:7890"
 ```
 
+## 配置与下载历史
+
+- **配置**：把 [config.example.json](config.example.json) 复制为 `config.json`（脚本同目录），脚本启动时自动读取。优先级：命令行参数 > config.json > 内置默认值。
+- **下载历史**：默认每次下载（成功/失败）追加一行可读文本到 `download_history.log`（脚本同目录，txt/log 格式）。可用 config 的 `history: false` 全局关闭，或用 `--no-history` 单次关闭；路径可用 config 的 `history_file` 或 `--history-file` 指定。
+- 功能规划见 [功能清单.md](功能清单.md)、[迭代计划.md](迭代计划.md)。
+
 ## 目录结构
 
 ```
 hls-downloader/
 ├── hls_download.py      # 主脚本（yt-dlp 封装）
 ├── 参数对照.md           # 参数 ↔ yt-dlp 映射 + 示例
-├── config.example.json  # 配置示例（当前脚本尚未读取，供后续扩展参考）
+├── config.example.json  # 配置示例（复制为 config.json 生效）
+├── 功能清单.md           # 功能清单（已实现 / 规划中 / 暂不做）
+├── 迭代计划.md           # 版本路线与优先级
 ├── 下载指南.md           # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
 ├── examples/            # 纯 Python 手动 AES-128 解密示例（教学用，不依赖 yt-dlp）
 │   ├── download_video.py
