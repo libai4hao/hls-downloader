@@ -8,6 +8,11 @@ downloads/
 config.json
 download_history.log
 
+# cookie 导出文件（含登录态，隐私，不进 git）
+conf/
+*.cookies.json
+cookies.txt
+
 # Python 缓存
 __pycache__/
 *.pyc

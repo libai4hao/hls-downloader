@@ -3,7 +3,7 @@
   "out_dir": "downloads",
   "cookies": "cookies.txt",
   "browser": "firefox",
-  "_注意": "cookies 与 browser 二选一，两者同时填会报错；都不填则不带登录态。",
+  "_注意": "cookies 与 browser 二选一，两者同时填会报错；都不填则不带登录态。cookies 支持 Netscape cookies.txt 或 Cookie-Editor 的 JSON 导出（自动识别）。",
   "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
   "referer": "https://www.example.com/",
   "proxy": "http://127.0.0.1:7890",

@@ -11,7 +11,7 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
     python hls_download.py "<网页链接 或 视频直链m3u8 链接>" [输出目录]
 
 可选参数（防盗链 / 登录态 / 代理 / 历史记录）：
-    --cookies <文件>       读取 cookies.txt（浏览器过验证后导出）
+    --cookies <文件>       读取 cookies 文件（Netscape cookies.txt 或 Cookie-Editor 的 JSON 导出，自动识别）
     -b, --browser <名>     从浏览器读 cookie（chrome / firefox / edge）
     --ua, --user-agent <串> 覆盖 User-Agent
     -r, --referer <url>    防盗链 Referer
@@ -31,7 +31,9 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
+import tempfile
 from datetime import datetime
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -88,6 +90,53 @@ def _resolve_path(value, default):
     return value if os.path.isabs(value) else os.path.join(HERE, value)
 
 
+def _strip_ansi(text):
+    """去掉文本里的 ANSI 颜色控制码（如 [0;31m），避免写进下载历史。"""
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _is_json_cookie_file(path):
+    """判断 --cookies 指向的文件是否为 Cookie-Editor 导出的 JSON 格式。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return isinstance(data, (dict, list))
+    except (OSError, ValueError):
+        return False
+
+
+def _convert_json_cookies(src):
+    """把 Cookie-Editor 的 JSON 导出转成 Netscape cookies.txt，写入临时文件并返回路径。
+
+    转换失败（非预期结构）返回 None。
+    """
+    with open(src, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    cookies = data.get("cookies") if isinstance(data, dict) else data
+    if not isinstance(cookies, list):
+        return None
+    lines = ["# Netscape HTTP Cookie File", ""]
+    for c in cookies:
+        if not isinstance(c, dict):
+            continue
+        domain = c.get("domain", "")
+        if not domain:
+            continue
+        host_only = bool(c.get("hostOnly", False))
+        include = "FALSE" if host_only else "TRUE"
+        d = domain if host_only else (domain if domain.startswith(".") else "." + domain)
+        path = c.get("path") or "/"
+        secure = "TRUE" if c.get("secure") else "FALSE"
+        exp = c.get("expirationDate")
+        expiry = "0" if (c.get("session") or exp is None) else str(int(float(exp)))
+        lines.append("\t".join([d, include, path, secure, expiry,
+                                c.get("name", ""), c.get("value", "")]))
+    fd, tmp = tempfile.mkstemp(prefix="hls_cookies_", suffix=".txt")
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    return tmp
+
+
 def _format_history_line(entry):
     """把一条历史记录格式化成一行可读文本（log 格式）。"""
     status = entry.get("status", "?")
@@ -98,7 +147,7 @@ def _format_history_line(entry):
     # 成功时标文件，失败时标错误
     detail = entry.get("filepath") or entry.get("error") or entry.get("out_dir", "")
     mark = "[成功]" if status == "success" else "[失败]"
-    return f"{time} {mark} {title} (id={vid}) | {url} | {detail}"
+    return _strip_ansi(f"{time} {mark} {title} (id={vid}) | {url} | {detail}")
 
 
 def _append_history(history_file, entry):
@@ -123,7 +172,8 @@ def _parse_args():
 
     # 登录态 / 反爬（二选一）
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--cookies", metavar="文件", help="读取 cookies.txt（浏览器过验证后导出）")
+    group.add_argument("--cookies", metavar="文件",
+                       help="读取 cookies 文件（支持 Netscape cookies.txt 或 Cookie-Editor 导出的 JSON）")
     group.add_argument("-b", "--browser", metavar="名称",
                        help="从浏览器读 cookie（如 chrome / firefox / edge）")
 
@@ -158,6 +208,15 @@ def main():
     browser = args.browser or config.get("browser")
     if cookies and browser:
         sys.exit("错误：cookies 与 browser 不能同时使用（命令行与 config.json 中只能二选一）。")
+
+    # --cookies 指向 Cookie-Editor 的 JSON 导出时，自动转成 Netscape 临时文件
+    tmp_cookie = None
+    if cookies and _is_json_cookie_file(cookies):
+        tmp_cookie = _convert_json_cookies(cookies)
+        if not tmp_cookie:
+            sys.exit("错误：cookies 文件是 JSON 格式但结构不合法，无法转换（应为 Cookie-Editor 导出格式）。")
+        print("提示：检测到 JSON 格式 cookies，已自动转换为 Netscape 格式。")
+        cookies = tmp_cookie
 
     user_agent = args.user_agent or config.get("user_agent")
     referer = args.referer or config.get("referer")
@@ -220,7 +279,6 @@ def main():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url=args.url, download=True)
-
         filepath = None
         if info and "requested_downloads" in info:
             for d in info["requested_downloads"]:
@@ -244,6 +302,12 @@ def main():
     else:
         if history_enabled:
             _append_history(history_file, entry)
+    finally:
+        if tmp_cookie and os.path.isfile(tmp_cookie):
+            try:
+                os.remove(tmp_cookie)
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":

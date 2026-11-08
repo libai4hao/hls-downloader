@@ -41,13 +41,18 @@ python hls_download.py "https://cdn.example.com/hls/xxx.m3u8&sign=xxx"
 
 | 参数 | 作用 |
 |------|------|
-| `--cookies <文件>` | 读 cookies.txt（浏览器过验证后导出） |
-| `-b, --browser <名>` | 从浏览器读 cookie（chrome / firefox / edge） |
+| `--cookies <文件>` | 读 cookies 文件（Netscape cookies.txt 或 Cookie-Editor 的 JSON 导出，自动识别；登录态首选） |
+| `-b, --browser <名>` | 从浏览器读 cookie（仅 firefox 等非 Chromium 可用；chrome/edge 受 ABE 限制） |
 | `--ua, --user-agent <串>` | 覆盖 User-Agent |
 | `-r, --referer <url>` | 防盗链 Referer |
 | `--proxy <url>` | 代理，如 `http://127.0.0.1:7890` |
 | `--no-history` | 本次下载不写入下载历史记录 |
 | `--history-file <文件>` | 下载历史文件路径，默认脚本同目录 `download_history.log` |
+
+> 需要登录态 / 过 Cloudflare 验证的站点（如 `jav.sb`、FC2 登录墙视频），请优先按
+> [doc/cookies导出指南.md](doc/cookies导出指南.md) 导出 cookies 后用 `--cookies`。
+> `--cookies` 同时支持 Netscape `cookies.txt` 和 Cookie-Editor 导出的 JSON（自动识别转换）。
+> 新版 Chrome/Edge 的 cookie 库被 App-Bound Encryption 锁定，`-b chrome` / `-b edge` 官方无解。
 
 完整映射与示例见 [doc/参数对照.md](doc/参数对照.md)。
 
@@ -75,7 +80,8 @@ hls-downloader/
 │   ├── 功能清单.md       # 功能清单（已实现 / 规划中 / 暂不做）
 │   ├── 迭代计划.md       # 版本路线与优先级
 │   ├── 参数对照.md       # 参数 ↔ yt-dlp 映射 + 示例
-│   └── 下载指南.md       # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
+│   ├── 下载指南.md       # 详细指南 + 报错速查 + IDM 抓不到链接的兜底方案
+│   └── cookies导出指南.md # cookies.txt 导出（登录态 / 过 Cloudflare 验证站点的首选方案）
 ├── examples/            # 纯 Python 手动 AES-128 解密示例（教学用，不依赖 yt-dlp）
 │   ├── download_video.py
 │   └── refill.py
