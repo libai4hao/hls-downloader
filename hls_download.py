@@ -318,7 +318,7 @@ def _parse_args():
     return parser.parse_args()
 
 
-def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwrite, want_name):
+def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwrite, want_name, log=print):
     """下载单个 URL，落到 out_dir（同名加序号/覆盖）。返回 (entry, error)。
 
     error 为 None 表示成功，否则为捕获到的异常（已写失败历史）。
@@ -375,9 +375,9 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
         entry["filepath"] = final_path
 
         if final_path:
-            print("已下载:", final_path)
+            log(f"已下载: {final_path}")
         else:
-            print("完成，输出目录:", out_dir)
+            log(f"完成，输出目录: {out_dir}")
     except Exception as e:
         entry["status"] = "failed"
         entry["error"] = str(e)
