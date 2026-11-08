@@ -55,6 +55,7 @@ python hls_download.py --batch urls.txt
 | `-o, --output <文件名>` | 固定输出文件名（不含扩展名自动补 `.mp4`，已含扩展名则原样） |
 | `--overwrite` | 同名文件直接覆盖（默认加序号 `名称 (1).mp4`） |
 | `--batch <文件>` | 批量下载，每行 `URL [文件名]`，`#` 注释与空行忽略 |
+| `--retries <次数>` | 下载失败额外重试次数，默认 3（0 关闭重试） |
 | `--no-history` | 本次下载不写入下载历史记录 |
 | `--history-file <文件>` | 下载历史文件路径，默认脚本同目录 `download_history.log` |
 
@@ -70,14 +71,15 @@ python hls_download.py --batch urls.txt
 python hls_download.py "https://cdn.example.com/hls/xxx.m3u8" ^
   --cookies cookies.txt --ua "Mozilla/5.0 ..." -r "https://www.example.com/" --proxy "http://127.0.0.1:7890"
 
-:: 批量下载 + 覆盖 UA / 代理
-python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://127.0.0.1:7890"
+:: 批量下载 + 覆盖 UA / 代理 + 失败重试
+python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://127.0.0.1:7890" --retries 5
 ```
 
 ## 配置与下载历史
 
 - **配置**：把 [config.example.json](config.example.json) 复制为 `config.json`（脚本同目录），脚本启动时自动读取。优先级：命令行参数 > config.json > 内置默认值。
 - **下载历史**：默认每次下载（成功/失败）追加一行可读文本到 `download_history.log`（脚本同目录，txt/log 格式）。可用 config 的 `history: false` 全局关闭，或用 `--no-history` 单次关闭；路径可用 config 的 `history_file` 或 `--history-file` 指定。
+- **失败清单**：批量下载重试耗尽后仍失败的条目写入 `failed_downloads.txt`（脚本同目录，每行 `URL [文件名]`，可直接回喂 `--batch` 补下）。
 - 功能规划见 [doc/功能清单.md](doc/功能清单.md)、[doc/迭代计划.md](doc/迭代计划.md)。
 
 ## 目录结构

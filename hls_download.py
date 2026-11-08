@@ -19,6 +19,7 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
     -o, --output <文件名>  固定输出文件名（不含扩展名时自动补 .mp4，已含扩展名则原样）
     --overwrite            同名文件直接覆盖（默认加序号，如 名称 (1).mp4）
     --batch <文件>         批量下载，每行 "URL [文件名]"，# 注释行与空行忽略
+    --retries <次数>       下载失败额外重试次数，默认 3（0 关闭重试）
     --no-history           本次下载不写入下载历史记录
     --history-file <文件>  下载历史文件路径，默认脚本同目录 download_history.log
 
@@ -45,6 +46,8 @@ ROOT = os.path.dirname(HERE)  # 上级目录
 
 CONFIG_FILE = os.path.join(HERE, "config.json")
 DEFAULT_HISTORY_FILE = os.path.join(HERE, "download_history.log")
+DEFAULT_FAILED_FILE = os.path.join(HERE, "failed_downloads.txt")
+DEFAULT_RETRIES = 3
 
 # 视为「已含扩展名」的音视频后缀，命中则文件名原样不补 .mp4
 _VIDEO_EXTS = (
@@ -204,6 +207,40 @@ def _read_batch_file(path):
     return items
 
 
+def _write_failed_list(path, items):
+    """把最终仍失败的条目写成失败清单，每行 "URL [文件名]"，可直接回喂 --batch。"""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            for url, name in items:
+                f.write(url if not name else f"{url} {name}")
+                f.write("\n")
+    except OSError as e:
+        print(f"警告：写入失败清单失败：{e}")
+        return False
+    return True
+
+
+def _retry_pending(download_one, pending, retries):
+    """队列式重试：对 pending 里的条目做最多 retries 轮，成功移出队列。
+
+    download_one 签名为 (url, name) -> error（None 表示成功）。
+    返回 (ok 增加数, 最终仍失败的 items)。
+    """
+    ok = 0
+    for _ in range(retries):
+        if not pending:
+            break
+        still = []
+        for url, name in pending:
+            err = download_one(url, name)
+            if err is None:
+                ok += 1
+            else:
+                still.append((url, name))
+        pending = still
+    return ok, pending
+
+
 def _format_history_line(entry):
     """把一条历史记录格式化成一行可读文本（log 格式）。"""
     status = entry.get("status", "?")
@@ -258,6 +295,8 @@ def _parse_args():
                         help="同名文件直接覆盖（默认加序号，如 名称 (1).mp4）")
     parser.add_argument("--batch", metavar="文件",
                         help="批量下载，每行 \"URL [文件名]\"，# 注释行与空行忽略")
+    parser.add_argument("--retries", metavar="次数", type=int, default=None,
+                        help="下载失败额外重试次数，默认 3（0 关闭重试）")
 
     # 历史记录
     parser.add_argument("--no-history", action="store_true",
@@ -376,6 +415,11 @@ def main():
     # 历史记录开关：config 的 history 为 false 或命令行 --no-history 时关闭
     history_enabled = bool(config.get("history", True)) and not args.no_history
 
+    # 重试次数：命令行 > config.json > 默认 3
+    retries = args.retries if args.retries is not None else int(config.get("retries", DEFAULT_RETRIES))
+    if retries < 0:
+        sys.exit("错误：--retries 不能为负数。")
+
     os.makedirs(out_dir, exist_ok=True)
 
     # 参数互斥校验
@@ -417,25 +461,49 @@ def main():
     if proxy:
         ydl_opts["proxy"] = proxy
 
+    def _dl(url, name):
+        return _download_one(url, ydl_opts, out_dir, history_enabled,
+                             history_file, args.overwrite, name)[1]
+
     try:
         if args.batch:
             items = _read_batch_file(args.batch)
             if not items:
                 sys.exit("错误：批量文件为空或无可下载的 URL。")
             ok = fail = 0
+            pending = []
+            # 第一轮：顺序跑完所有条目
             for i, (url, name) in enumerate(items, 1):
                 print(f"[{i}/{len(items)}] 下载中: {url}")
-                _, err = _download_one(url, ydl_opts, out_dir, history_enabled,
-                                       history_file, args.overwrite, name)
+                err = _dl(url, name)
                 if err is None:
                     ok += 1
                 else:
-                    fail += 1
+                    pending.append((url, name))
                     print(f"    失败：{url}（{err}）")
-            print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条。")
+            # 队列式重试：失败条目最多额外重试 retries 轮
+            if pending and retries > 0:
+                print(f"重试失败条目（最多 {retries} 轮）…")
+                gained, pending = _retry_pending(_dl, pending, retries)
+                ok += gained
+            fail = len(pending)
+            failed_file = None
+            if pending:
+                failed_file = DEFAULT_FAILED_FILE
+                _write_failed_list(failed_file, pending)
+            if fail:
+                print(f"批量下载完成：成功 {ok} 条，失败 {fail} 条"
+                      f"（详见 {failed_file}）。")
+            else:
+                print(f"批量下载完成：成功 {ok} 条，失败 0 条。")
         else:
-            _, err = _download_one(args.url, ydl_opts, out_dir, history_enabled,
-                                   history_file, args.overwrite, args.output)
+            err = _dl(args.url, args.output)
+            # 单条：失败后额外重试 retries 次
+            attempt = 1
+            while err is not None and attempt <= retries:
+                attempt += 1
+                print(f"第 {attempt - 1} 次重试: {args.url}")
+                err = _dl(args.url, args.output)
             if err is not None:
                 raise err
     finally:

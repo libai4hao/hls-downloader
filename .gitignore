@@ -7,6 +7,7 @@ downloads/
 # 本地配置与下载历史（含个人 cookie / 出口 IP 等隐私，不进 git）
 config.json
 download_history.log
+failed_downloads.txt
 
 # cookie 导出文件（含登录态，隐私，不进 git）
 conf/
