@@ -16,7 +16,7 @@
 - 不做 curl_cffi / TLS 指纹伪装（已评估对 Cloudflare Turnstile 无效）。
 - 不做 GUI 自动化测试（tkinter 不适合 headless 单测）。
 - 不改动现有 CLI 参数语义、默认值、历史记录格式。
-- 不把 ffprobe / ffplay / ffmpeg 文档打进 exe（只打 `ffmpeg.exe`）。
+- 不把 ffplay / ffmpeg 文档打进 exe（只打 `ffmpeg.exe` + `ffprobe.exe`，后者为 yt-dlp FixupM3u8 转封装读元数据所必需）。
 
 ## 3. 用户已确认的决策
 
@@ -115,7 +115,7 @@ doc/ 7 份文档        同步（含本文档、迭代计划 V3.0 标记完成�
   - `build_gui.spec`：入口 `gui.py`，`console=False`（`--windowed`，无黑框）。
 - 资源收集：
   - `ytdlp_lib/` → 打进 exe（`--collect-all yt_dlp` 收集动态 import 的 extractor 子模块）。
-  - `ffmpeg-*/bin/ffmpeg.exe` → 打进 exe（映射为 `ffmpeg/bin/ffmpeg.exe`，供 `_find_ffmpeg_dir` 在 `sys._MEIPASS` 下找到）。**只打 ffmpeg.exe，不打 ffprobe/ffplay/文档**。
+  - `ffmpeg-*/bin/ffmpeg.exe` → 打进 exe（映射为 `ffmpeg/bin/ffmpeg.exe`，供 `_find_ffmpeg_dir` 在 `sys._MEIPASS` 下找到）。**打 ffmpeg.exe 与 ffprobe.exe（ffprobe 为 yt-dlp FixupM3u8 转封装读元数据所必需），不打 ffplay/文档**。
   - `hls_download.py` 的 datas：无（config.example.json 仅作参考，不打进 exe）。
 - 体积预估：ffmpeg.exe 217.9 MB + ytdlp_lib 13.6 MB + Python 运行时 ≈ **200–250 MB** 单文件。
 - 已知代价：单文件 exe 每次启动解压到临时目录，启动比源码运行慢数秒；这是「单文件自包含」的必然权衡，用户已确认接受。
@@ -133,7 +133,7 @@ doc/ 7 份文档        同步（含本文档、迭代计划 V3.0 标记完成�
 | 风险 | 缓解 | 回滚 |
 |---|---|---|
 | PyInstaller 未收集 yt-dlp 动态 extractor | `--collect-all yt_dlp` 全量收集 | 回退 commit |
-| exe 体积 200MB+ | 只打 ffmpeg.exe，剔除 ffprobe/ffplay/文档 | 用户已确认接受 |
+| exe 体积 200MB+ | 只打 ffmpeg.exe + ffprobe.exe，剔除 ffplay/文档 | 用户已确认接受 |
 | frozen 下 HERE 指错导致找不到 config/ffmpeg | 第 4.2 节资源/数据目录区分 | 回退 commit |
 | `log` 回调改造影响 CLI 输出 | 默认 `print`，回归测试覆盖 | 回退 commit |
 | tkinter 跨线程改控件崩溃 | 严格经 `queue` + `root.after` 回主线程 | 回退 commit |
