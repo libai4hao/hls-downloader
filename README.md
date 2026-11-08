@@ -104,7 +104,7 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 - `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口）
 - `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
 
-> ⚠️ 运行 `dist\` 下的 exe。`build\` 是 PyInstaller 的中间产物，那里的 exe 是 bootloader 骨架，旁边没有 `_internal\`，双击会闪退/报 `Failed to load Python DLL`。
+> ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
 > 打包后数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁，只读资源（yt-dlp / ffmpeg）在 `_internal/`。
 
