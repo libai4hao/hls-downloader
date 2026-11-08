@@ -1,4 +1,5 @@
 # build_gui.spec — hls_download 的 GUI 打包（onedir 目录分发，windowed，无控制台）
+import shutil
 import sys
 from pathlib import Path
 
@@ -58,3 +59,7 @@ coll = COLLECT(
     upx=False,
     name="hls_download_gui",
 )
+
+# 打包完成后清理 PyInstaller 中间产物目录 build/（只留 dist/ 成品）
+shutil.rmtree(ROOT / "build", ignore_errors=True)
+

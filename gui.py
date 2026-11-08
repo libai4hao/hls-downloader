@@ -203,26 +203,26 @@ class App:
                         nm = parts[1].strip() if len(parts) > 1 else None
                         items.append((url, nm))
                     total = len(items)
-                    self.q.put(("__status__", f"下载中 1/{total}"))
+                    self.q.put(("__status__", f"开始批量下载，共 {total} 条"))
                     ok, fail_count, failed_file = h._run_batch(
                         items, ydl_opts, out_dir, history_enabled, history_file,
                         False, retries, log=log, stop_evt=self.stop_evt)
                     if self.stop_evt.is_set():
                         self.q.put(("__status__", "已停止"))
                     elif fail_count:
-                        self.q.put(("__status__", f"已完成（批量）：成功 {ok}/{total}，失败 {fail_count}"))
+                        self.q.put(("__status__", f"批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
                     else:
-                        self.q.put(("__status__", f"已完成（批量）：成功 {ok}/{total}"))
+                        self.q.put(("__status__", f"批量下载完成：成功 {ok}/{total}"))
                 else:
-                    self.q.put(("__status__", "下载中…"))
+                    self.q.put(("__status__", "开始下载…"))
                     err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
                                         history_file, False, retries, log=log,
                                         stop_evt=self.stop_evt)
                     if err is not None:
-                        log(f"失败：{err}")
+                        log(f"下载失败：{err}")
                         self.q.put(("__status__", "失败"))
                     else:
-                        self.q.put(("__status__", "成功"))
+                        self.q.put(("__status__", "下载成功"))
             finally:
                 if tmp_cookie and os.path.isfile(tmp_cookie):
                     try:

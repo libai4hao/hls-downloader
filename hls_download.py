@@ -427,13 +427,13 @@ def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrit
     for i, (url, name) in enumerate(items, 1):
         if stop_evt is not None and stop_evt.is_set():
             break  # 停止：剩余条目不下载、不记失败
-        log(f"[{i}/{len(items)}] 下载中: {url}")
+        log(f"[{i}/{len(items)}] 开始下载: {url}")
         err = _dl(url, name)
         if err is None:
             ok += 1
         else:
             pending.append((url, name))
-            log(f"    失败：{url}（{err}）")
+            log(f"[{i}/{len(items)}] 下载失败: {url}（{err}）")
     if pending and retries > 0:
         log(f"重试失败条目（最多 {retries} 轮）…")
         gained, pending = _retry_pending(_dl, pending, retries, stop_evt)

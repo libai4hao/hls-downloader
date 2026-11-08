@@ -1,4 +1,5 @@
 # build_cli.spec — hls_download 的 CLI 打包（onedir 目录分发，沙箱/低完整性环境可用）
+import shutil
 import sys
 from pathlib import Path
 
@@ -62,3 +63,7 @@ coll = COLLECT(
     upx=False,
     name="hls_download",
 )
+
+# 打包完成后清理 PyInstaller 中间产物目录 build/（只留 dist/ 成品）
+shutil.rmtree(ROOT / "build", ignore_errors=True)
+
