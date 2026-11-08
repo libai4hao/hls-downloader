@@ -1,4 +1,4 @@
-# build_cli.spec — hls_download 的 CLI 单文件打包
+# build_cli.spec — hls_download 的 CLI 打包（onedir 目录分发，沙箱/低完整性环境可用）
 import sys
 from pathlib import Path
 
@@ -9,10 +9,13 @@ sys.path.insert(0, str(YTDLP_LIB))
 
 from PyInstaller.utils.hooks import collect_all
 
-# ffmpeg.exe：优先项目目录，否则上级目录（与 hls_download._find_ffmpeg_dir 的搜索一致）
+# ffmpeg.exe + ffprobe.exe：优先项目目录，否则上级目录（与 hls_download._find_ffmpeg_dir 的搜索一致）
 FFMPEG_BIN = next(ROOT.glob("ffmpeg*/bin/ffmpeg.exe"), None)
+FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
 if FFMPEG_BIN is None:
     FFMPEG_BIN = next(ROOT.parent.glob("ffmpeg*/bin/ffmpeg.exe"), None)
+    FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
+FFPROBE_BIN = FFMPEG_DIR / "ffprobe.exe" if FFMPEG_DIR and (FFMPEG_DIR / "ffprobe.exe").exists() else None
 
 # 全量收集 yt-dlp 动态 import 的 extractor 子模块（返回 datas, binaries, hiddenimports 三元组）
 _yt_datas, _yt_binaries, _yt_hidden = collect_all("yt_dlp")
@@ -20,7 +23,11 @@ _yt_datas, _yt_binaries, _yt_hidden = collect_all("yt_dlp")
 a = Analysis(
     ["hls_download.py"],
     pathex=[str(ROOT), str(YTDLP_LIB)],
-    binaries=[(str(FFMPEG_BIN), "ffmpeg/bin")] if FFMPEG_BIN else [],
+    binaries=(
+        [(str(FFMPEG_BIN), "ffmpeg/bin")] if FFMPEG_BIN else []
+    ) + (
+        [(str(FFPROBE_BIN), "ffmpeg/bin")] if FFPROBE_BIN else []
+    ),
     datas=_yt_datas,
     hiddenimports=_yt_hidden,
     hookspath=[],
@@ -36,9 +43,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="hls_download",
     debug=False,
     bootloader_ignore_signals=False,
@@ -46,4 +52,13 @@ exe = EXE(
     upx=False,
     console=True,
     disable_windowed_traceback=False,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="hls_download",
 )

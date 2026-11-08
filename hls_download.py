@@ -111,7 +111,8 @@ def _resolve_path(value, default):
     """把配置/命令行里的路径统一成绝对路径；相对路径以脚本目录为基准。"""
     if not value:
         return default
-    return value if os.path.isabs(value) else os.path.join(HERE, value)
+    # frozen(onedir) 下相对路径以 exe 所在目录(DATA_DIR)为基准；源码运行 DATA_DIR==HERE
+    return value if os.path.isabs(value) else os.path.join(DATA_DIR, value)
 
 
 def _strip_ansi(text):
@@ -469,7 +470,7 @@ def main():
     proxy = args.proxy or config.get("proxy")
 
     out_dir = _resolve_path(args.out_dir or config.get("out_dir"),
-                            os.path.join(HERE, "downloads"))
+                            os.path.join(DATA_DIR, "downloads"))
     history_file = _resolve_path(args.history_file or config.get("history_file"),
                                  DEFAULT_HISTORY_FILE)
     # 历史记录开关：config 的 history 为 false 或命令行 --no-history 时关闭
