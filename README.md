@@ -130,6 +130,7 @@ hls-downloader/
 ├── build_cli.spec       # PyInstaller 打包 CLI（onedir 文件夹）
 ├── build_gui.spec       # PyInstaller 打包 GUI（onedir 文件夹）
 ├── doc/                 # 文档目录
+│   ├── 发布SOP.md        # 发布流程（版本号 → 打 tag → 自动构建发布）
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）
 │   ├── 代码地图.md       # 代码地图（文件导航 + 关键代码行号）
 │   ├── 功能清单.md       # 功能清单（已实现 / 规划中 / 暂不做）
