@@ -1,4 +1,4 @@
-# build_gui.spec — hls_download 的 GUI 打包（单文件 onefile，windowed，点击即用）
+# build_gui.spec — hls_download 的 GUI 打包（onedir 文件夹分发，启动快、有图标）
 import shutil
 import sys
 from pathlib import Path
@@ -40,9 +40,8 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="hls_download_gui",
     debug=False,
     bootloader_ignore_signals=False,
@@ -50,6 +49,17 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
+    icon="app.ico",
+    version="version_info.txt",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="hls_download_gui",
 )
 
 # 打包完成后清理 PyInstaller 中间产物目录 build/（只留 dist/ 成品）

@@ -92,7 +92,7 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 
 ## 打包（可选）
 
-用 PyInstaller 打成**单文件（onefile）**，双击 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
+用 PyInstaller 打成**文件夹（onedir）**，双击里面的 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
 
 ```bat
 :: 在 .venv_build 虚拟环境里装 pyinstaller 后执行
@@ -101,12 +101,22 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 ```
 
 产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
-- `dist\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
-- `dist\hls_download_gui.exe` — GUI 版（无控制台）
+- `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
+- `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
 
 > ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
-> 单文件 exe 首次运行会解压到系统临时目录（解压需要十几秒），之后正常启动；数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁。
+> **为什么改成文件夹分发（onedir）而不是单个 exe？** 单文件 exe 每次启动都要先把几百 MB 的 Python + yt-dlp + ffmpeg 解压到系统临时目录，首次启动要等十几秒甚至更久。文件夹分发的 exe 直接读取旁边的 `_internal\`，**启动秒开**。代价是产物是一整个文件夹，不是单个文件。
+>
+> **怎么发给别人？** 把整个 `dist\hls_download_gui\`（或 `dist\hls_download\`）文件夹压成一个 zip 发出去；对方解压后双击里面的 `hls_download_gui.exe` 即可。数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁（即 `_internal\` 同级目录）。
+
+## 首次运行被 Windows 拦截怎么办（SmartScreen）
+
+本工具是**未签名的免费程序**，Windows 会把它标记为「未知发布者」，首次从网络下载/解压运行时会弹蓝色提示「Windows 已保护你的电脑」。这是 Windows 对未签名程序的标准提醒，**不是病毒，也不是杀软误报**；点击过一次「仍要运行」后，Windows 记下解锁标记，之后就不再弹。
+
+- 拦截框里点 **「更多信息」→「仍要运行」** 即可。
+- 若右键菜单或文件属性里显示「此文件来自其他计算机」，可右键 exe → **属性** → 勾选「解除锁定」→ 确定，也能消除提示。
+- 要**彻底根除**这个提示，只能购买代码签名证书（OV/EV，按年付费），免费无法做到。已尽量在 exe 里写入产品名/版本信息让观感更正规，但 SmartScreen 对未签名程序仍会提示。
 
 ## 目录结构
 
@@ -115,8 +125,10 @@ hls-downloader/
 ├── hls_download.py      # 主脚本（CLI 入口 + 下载核心函数）
 ├── gui.py               # tkinter 图形界面（复用 hls_download）
 ├── config.example.json  # 配置示例（复制为 config.json 生效）
-├── build_cli.spec       # PyInstaller 打包 CLI（单文件 onefile）
-├── build_gui.spec       # PyInstaller 打包 GUI（单文件 onefile）
+├── app.ico              # 程序图标（打包时写入 exe）
+├── version_info.txt     # exe 版本信息（公司名/产品名/版本号）
+├── build_cli.spec       # PyInstaller 打包 CLI（onedir 文件夹）
+├── build_gui.spec       # PyInstaller 打包 GUI（onedir 文件夹）
 ├── doc/                 # 文档目录
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）
 │   ├── 代码地图.md       # 代码地图（文件导航 + 关键代码行号）

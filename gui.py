@@ -3,6 +3,7 @@
 import logging
 import os
 import queue
+import re
 import threading
 
 import hls_download as h
@@ -40,6 +41,8 @@ class App:
         self.q = queue.Queue()
         self.stop_evt = threading.Event()
         self.worker = None
+        self._progress_title = None
+        self._progress_prefix = "下载中："
 
         self._build_ui()
         self.root.after(100, self._poll_queue)
@@ -76,14 +79,20 @@ class App:
         ttk.Button(btns, text="开始下载", command=self._start).pack(side="left", padx=4)
         ttk.Button(btns, text="停止", command=self._stop).pack(side="left", padx=4)
 
+        self.progress = ttk.Progressbar(frm, mode="determinate", maximum=100, value=0)
+        self.progress.grid(row=11, column=0, columnspan=2, sticky="we", **pad)
+
         self.status_var = tk.StringVar(value="待命")
-        ttk.Label(frm, textvariable=self.status_var).grid(row=11, column=0, columnspan=2, sticky="w", **pad)
+        self.status_label = tk.Label(
+            frm, textvariable=self.status_var, anchor="w",
+            font=("Microsoft YaHei", 11, "bold"), fg="#1a1a1a")
+        self.status_label.grid(row=12, column=0, columnspan=2, sticky="we", **pad)
 
         self.log_text = scrolledtext.ScrolledText(frm, height=12, width=72, state="disabled")
-        self.log_text.grid(row=12, column=0, columnspan=2, sticky="nsew", **pad)
+        self.log_text.grid(row=13, column=0, columnspan=2, sticky="nsew", **pad)
 
         frm.columnconfigure(0, weight=1)
-        frm.rowconfigure(12, weight=1)
+        frm.rowconfigure(13, weight=1)
 
     def _pick_out(self):
         d = filedialog.askdirectory()
@@ -96,7 +105,7 @@ class App:
             self.cookie_var.set(f)
 
     def _poll_queue(self):
-        """主线程统一消费队列：str=日志，__status__=状态栏，__error__=弹框。"""
+        """主线程统一消费队列：str=日志，__status__=状态栏，__progress__=进度，__error__=弹框。"""
         try:
             while True:
                 item = self.q.get_nowait()
@@ -104,15 +113,66 @@ class App:
                     kind, payload = item
                     if kind == "__status__":
                         self.status_var.set(payload)
+                    elif kind == "__progress__":
+                        self._set_progress(payload)
                     elif kind == "__error__":
                         self._append_log(payload)
-                        self.status_var.set("失败")
+                        self.status_var.set("❌ 失败")
                         messagebox.showerror("错误", payload)
                 else:
                     self._append_log(item)
         except queue.Empty:
             pass
         self.root.after(100, self._poll_queue)
+
+    def _set_progress(self, d):
+        """根据 yt-dlp progress_hooks 的 dict 刷新进度条与状态栏。
+
+        进度源优先级：
+        1. HLS 分片进度 fragment_index/fragment_count —— 单调、稳定，不会因
+           yt-dlp 的 total_bytes_estimate 逐片估算而回退/忽快忽慢（动画异常根因）；
+        2. yt-dlp 的 _percent_str（普通 HTTP 下载，最准）；
+        3. downloaded_bytes / total_bytes（或 total_bytes_estimate）字节推算；
+        4. live 流（无总片数、无总字节）—— 只显示已下载字节数，不设进度百分比。
+        """
+        if d.get("_reset"):
+            self.progress["value"] = 0
+            self._progress_title = None
+            return
+
+        pct = None
+        frag_index = d.get("fragment_index")
+        frag_count = d.get("fragment_count")
+        if frag_count:
+            # HLS 分片进度：fragment_index 单调递增到 fragment_count，最稳
+            pct = (frag_index or 0) / frag_count * 100
+        if pct is None and d.get("_percent_str"):
+            try:
+                pct = float(d["_percent_str"].rstrip("%"))
+            except (TypeError, ValueError):
+                pct = None
+        if pct is None and (d.get("total_bytes") or d.get("total_bytes_estimate")):
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            if total > 0:
+                pct = (d.get("downloaded_bytes") or 0) / total * 100
+
+        if pct is not None:
+            self.progress["value"] = min(max(pct, 0.0), 100.0)
+
+        title = (d.get("info_dict") or {}).get("title")
+        if title:
+            self._progress_title = title
+        prefix = self._progress_prefix
+        live_done = (d.get("downloaded_bytes") or 0) / 1048576  # MB
+        if self._progress_title:
+            if pct is not None:
+                self.status_var.set(f"{prefix}{self._progress_title}  {pct:.1f}%")
+            elif not frag_count and live_done > 0:
+                self.status_var.set(f"{prefix}{self._progress_title}  已下载 {live_done:.1f} MB")
+            else:
+                self.status_var.set(f"{prefix}{self._progress_title}")
+        elif pct is not None:
+            self.status_var.set(f"{prefix}{pct:.1f}%")
 
     def _append_log(self, msg):
         self.log_text.configure(state="normal")
@@ -144,6 +204,11 @@ class App:
         self.stop_evt.set()
         self.q.put(("__status__", "已请求停止（当前片段结束后生效）…"))
 
+    def _progress_hook(self, d):
+        """yt-dlp progress_hooks 回调（worker 线程）：把下载进度推到主线程。"""
+        if d.get("status") in ("downloading", "finished"):
+            self.q.put(("__progress__", d))
+
     def _download(self, lines, out_dir, name, cookies, proxy, is_batch):
         def log(msg):
             self.q.put(msg)
@@ -169,6 +234,7 @@ class App:
                 "retries": 10,
                 "fragment_retries": 10,
                 "logger": _build_logger(self.q),
+                "progress_hooks": [self._progress_hook],
             }
 
             tmp_cookie = None
@@ -195,7 +261,7 @@ class App:
 
             try:
                 if is_batch:
-                    # 批量：复用 h._run_batch，带回重试 + 失败清单；stop_evt 支持停止后续条目
+                    # 批量：复用 h._run_batch；拦截「[i/M] 开始下载」更新进度前缀
                     items = []
                     for ln in lines:
                         parts = ln.split(None, 1)
@@ -203,26 +269,35 @@ class App:
                         nm = parts[1].strip() if len(parts) > 1 else None
                         items.append((url, nm))
                     total = len(items)
+
+                    def batch_log(msg):
+                        m = re.match(r"\[(\d+)/(\d+)\] 开始下载", msg)
+                        if m:
+                            self._progress_prefix = f"[{m.group(1)}/{total}] 正在下载："
+                            self.q.put(("__progress__", {"_reset": True}))
+                        self.q.put(msg)
+
                     self.q.put(("__status__", f"开始批量下载，共 {total} 条"))
                     ok, fail_count, failed_file = h._run_batch(
                         items, ydl_opts, out_dir, history_enabled, history_file,
-                        False, retries, log=log, stop_evt=self.stop_evt)
+                        False, retries, log=batch_log, stop_evt=self.stop_evt)
                     if self.stop_evt.is_set():
                         self.q.put(("__status__", "已停止"))
                     elif fail_count:
-                        self.q.put(("__status__", f"批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
+                        self.q.put(("__status__", f"⚠️ 批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
                     else:
-                        self.q.put(("__status__", f"批量下载完成：成功 {ok}/{total}"))
+                        self.q.put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"))
                 else:
+                    self._progress_prefix = "下载中："
                     self.q.put(("__status__", "开始下载…"))
                     err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
                                         history_file, False, retries, log=log,
                                         stop_evt=self.stop_evt)
                     if err is not None:
                         log(f"下载失败：{err}")
-                        self.q.put(("__status__", "失败"))
+                        self.q.put(("__status__", "❌ 下载失败"))
                     else:
-                        self.q.put(("__status__", "下载成功"))
+                        self.q.put(("__status__", "✅ 下载成功"))
             finally:
                 if tmp_cookie and os.path.isfile(tmp_cookie):
                     try:
