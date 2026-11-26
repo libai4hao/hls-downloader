@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import threading
+import time
 
 import hls_download as h
 
@@ -13,6 +14,14 @@ try:
     from tkinter import filedialog, messagebox, scrolledtext, ttk
 except ImportError:
     raise SystemExit("错误：需要 tkinter（Python 标准库自带）。")
+
+
+CLOSE_TIMEOUT_SECONDS = 30
+
+
+def _configured_out_dir():
+    default = os.path.join(h.DATA_DIR, "downloads")
+    return h._resolve_path(h._load_config().get("out_dir"), default)
 
 
 class _QueueLogHandler(logging.Handler):
@@ -43,6 +52,8 @@ class App:
         self.worker = None
         self._progress_title = None
         self._closing = False
+        self._close_deadline = None
+        self._tmp_cookie = None
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -58,7 +69,7 @@ class App:
         self.url_text.grid(row=1, column=0, columnspan=2, sticky="we", **pad)
 
         ttk.Label(frm, text="输出目录：").grid(row=2, column=0, sticky="w", **pad)
-        self.out_var = tk.StringVar(value=os.path.join(h.DATA_DIR, "downloads"))
+        self.out_var = tk.StringVar(value=_configured_out_dir())
         ttk.Entry(frm, textvariable=self.out_var, width=56).grid(row=3, column=0, sticky="we", **pad)
         ttk.Button(frm, text="选择…", command=self._pick_out).grid(row=3, column=1, **pad)
 
@@ -124,10 +135,15 @@ class App:
                     self._append_log(item)
         except queue.Empty:
             pass
-        if self._closing and self.worker and not self.worker.is_alive():
-            # worker 已收尾（临时 cookie 等已清理），此时再销毁窗口
-            self.root.destroy()
-            return
+        if self._closing and self.worker:
+            if not self.worker.is_alive():
+                # worker 已收尾（临时 cookie 等已清理），此时再销毁窗口
+                self.root.destroy()
+                return
+            if self._close_deadline is not None and time.monotonic() >= self._close_deadline:
+                self._cleanup_tmp_cookie()
+                self.root.destroy()
+                return
         self.root.after(100, self._poll_queue)
 
     def _set_progress(self, d):
@@ -185,6 +201,15 @@ class App:
         self.log_text.configure(state="disabled")
         self.log_text.see("end")
 
+    def _cleanup_tmp_cookie(self):
+        path = self._tmp_cookie
+        self._tmp_cookie = None
+        if path and os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
     def _start(self):
         if self.worker and self.worker.is_alive():
             messagebox.showinfo("提示", "已有下载在进行中。")
@@ -194,7 +219,7 @@ class App:
         if not lines:
             messagebox.showwarning("提示", "请填写至少一个视频链接。")
             return
-        out_dir = self.out_var.get().strip() or os.path.join(h.DATA_DIR, "downloads")
+        out_dir = h._resolve_path(self.out_var.get().strip(), _configured_out_dir())
         name = self.name_var.get().strip() or None
         cookies = self.cookie_var.get().strip() or None
         proxy = self.proxy_var.get().strip() or None
@@ -213,6 +238,7 @@ class App:
         """关闭窗口：下载中先请求停止，等 worker 收尾并清理临时文件后再销毁窗口。"""
         if self.worker and self.worker.is_alive():
             self._closing = True
+            self._close_deadline = time.monotonic() + CLOSE_TIMEOUT_SECONDS
             self.stop_evt.set()
             self.status_var.set("正在停止并清理，请稍候…")
         else:
@@ -255,13 +281,13 @@ class App:
                 "progress_hooks": [lambda d: self._progress_hook(d, prefix)],
             }
 
-            tmp_cookie = None
             if cookies:
                 if h._is_json_cookie_file(cookies):
                     tmp_cookie = h._convert_json_cookies(cookies)
                     if not tmp_cookie:
                         fail("错误：cookies 文件是 JSON 但结构不合法。")
                         return
+                    self._tmp_cookie = tmp_cookie
                     log("提示：检测到 JSON cookies，已自动转 Netscape。")
                     cookies = tmp_cookie
                 ydl_opts["cookiefile"] = cookies
@@ -271,7 +297,6 @@ class App:
             config = h._load_config()
             history_enabled = h._as_bool(config.get("history", True))
             history_file = h._resolve_path(config.get("history_file"), h.DEFAULT_HISTORY_FILE)
-            out_dir = h._resolve_path(config.get("out_dir"), out_dir) if not self.out_var.get().strip() else out_dir
             retries = 3
             try:
                 retries = int(config.get("retries", 3))
@@ -280,53 +305,52 @@ class App:
             retries = max(0, min(retries, h.MAX_RETRIES))
             os.makedirs(out_dir, exist_ok=True)
 
-            try:
-                if is_batch:
-                    # 批量：复用 h._run_batch；拦截「[i/M] 开始下载」更新进度前缀
-                    items = []
-                    for ln in lines:
-                        parts = ln.split(None, 1)
-                        url = parts[0]
-                        nm = parts[1].strip() if len(parts) > 1 else None
-                        items.append((url, nm))
-                    total = len(items)
+            if is_batch:
+                # 批量：复用 h._run_batch；拦截「[i/M] 开始下载」更新进度前缀
+                items = []
+                for ln in lines:
+                    parts = ln.split(None, 1)
+                    url = parts[0]
+                    nm = parts[1].strip() if len(parts) > 1 else None
+                    items.append((url, nm))
+                total = len(items)
 
-                    def batch_log(msg):
-                        nonlocal prefix
-                        m = re.match(r"\[(\d+)/(\d+)\] 开始下载", msg)
-                        if m:
-                            prefix = f"[{m.group(1)}/{total}] 正在下载："
-                            self.q.put(("__progress__", {"_reset": True}))
-                        self.q.put(msg)
+                def batch_log(msg):
+                    nonlocal prefix
+                    m = re.match(r"\[(\d+)/(\d+)\] 开始下载", msg)
+                    if m:
+                        prefix = f"[{m.group(1)}/{total}] 正在下载："
+                        self.q.put(("__progress__", {"_reset": True}))
+                    self.q.put(msg)
 
-                    self.q.put(("__status__", f"开始批量下载，共 {total} 条"))
-                    ok, fail_count, failed_file = h._run_batch(
-                        items, ydl_opts, out_dir, history_enabled, history_file,
-                        False, retries, log=batch_log, stop_evt=self.stop_evt)
-                    if self.stop_evt.is_set():
-                        self.q.put(("__status__", "已停止"))
-                    elif fail_count:
-                        self.q.put(("__status__", f"⚠️ 批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
-                    else:
-                        self.q.put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"))
+                self.q.put(("__status__", f"开始批量下载，共 {total} 条"))
+                ok, fail_count, failed_file = h._run_batch(
+                    items, ydl_opts, out_dir, history_enabled, history_file,
+                    False, retries, log=batch_log, stop_evt=self.stop_evt)
+                if self.stop_evt.is_set():
+                    self.q.put(("__status__", "已停止"))
+                elif fail_count:
+                    self.q.put(("__status__", f"⚠️ 批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
                 else:
-                    self.q.put(("__status__", "开始下载…"))
-                    err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
-                                        history_file, False, retries, log=log,
-                                        stop_evt=self.stop_evt)
-                    if err is not None:
-                        log(f"下载失败：{err}")
-                        self.q.put(("__status__", "❌ 下载失败"))
-                    else:
-                        self.q.put(("__status__", "✅ 下载成功"))
-            finally:
-                if tmp_cookie and os.path.isfile(tmp_cookie):
-                    try:
-                        os.remove(tmp_cookie)
-                    except OSError:
-                        pass
+                    self.q.put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"))
+            else:
+                self.q.put(("__status__", "开始下载…"))
+                err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
+                                    history_file, False, retries, log=log,
+                                    stop_evt=self.stop_evt)
+                if self.stop_evt.is_set():
+                    self.q.put(("__status__", "已停止"))
+                elif err is not None:
+                    log(f"下载失败：{err}")
+                    self.q.put(("__status__", "❌ 下载失败"))
+                else:
+                    self.q.put(("__status__", "✅ 下载成功"))
+        except h.DownloadCancelled:
+            self.q.put(("__status__", "已停止"))
         except Exception as e:
             fail(f"异常：{e}")
+        finally:
+            self._cleanup_tmp_cookie()
 
 
 def main():

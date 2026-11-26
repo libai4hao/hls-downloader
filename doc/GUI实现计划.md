@@ -18,7 +18,7 @@
 - yt-dlp 查找优先级不变：系统已安装 > `ytdlp_lib/`。
 - exe 打包**只打 `ffmpeg.exe`**，不打 ffprobe/ffplay/文档。
 - 数据文件（config.json / download_history.log / failed_downloads.txt / downloads/）在 frozen 下写 exe 旁边（`os.path.dirname(sys.executable)`），资源（ytdlp_lib / ffmpeg）在 frozen 下读 `sys._MEIPASS`。
-- 本仓库**无 pytest 测试套件**，历史上用临时打桩脚本 `_verify_*.py`（fake YoutubeDL）+ 真实命令回归验证，验证后删除。本计划沿用此约定，不引入 pytest。
+- 回归测试位于 `tests/test_hls_download.py`，使用 pytest；发布工作流在构建前执行 `python -m pytest -q`。
 
 ## Review Focus
 
@@ -841,6 +841,6 @@ git status && git log --oneline -12
 
 ## 备注
 
-- 本仓库无 pytest，全部验证用「临时打桩脚本 + 真实命令」，验证后删脚本，沿用历史约定。
-- `gui.py` 的「停止」为尽力语义（yt-dlp 不支持中断当前片段），与 spec 第 5.3 节一致。
+- 回归测试位于 `tests/test_hls_download.py`，发布工作流在构建前运行 `python -m pytest -q`。
+- `gui.py` 的「停止」通过进度回调取消当前下载并清理 staging；关闭窗口等待 worker 收尾，超时后强制关闭。
 - 打包体积 200–250 MB 是「单文件自包含」的必然代价，spec 已确认接受。

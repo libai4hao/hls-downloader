@@ -57,6 +57,11 @@ DEFAULT_RETRIES = 3
 MAX_RETRIES = 10
 MAX_HISTORY_DETAIL = 200
 
+
+class DownloadCancelled(Exception):
+    pass
+
+
 # 视为「已含扩展名」的音视频后缀，命中则文件名原样不补 .mp4
 _VIDEO_EXTS = (
     ".mp4", ".mkv", ".ts", ".mov", ".flv", ".webm", ".avi",
@@ -94,7 +99,7 @@ def _setup_ytdlp():
         if os.path.isdir(lib):
             sys.path.insert(0, lib)
             return
-    sys.exit("错误：找不到 yt_dlp。请安装 yt-dlp，或把 ytdlp_lib 放到脚本同目录/上级目录。")
+    raise RuntimeError("错误：找不到 yt_dlp。请安装 yt-dlp，或把 ytdlp_lib 放到脚本同目录/上级目录。")
 
 
 def _load_config():
@@ -121,6 +126,11 @@ def _resolve_path(value, default):
 def _strip_ansi(text):
     """去掉文本里的 ANSI 颜色控制码（如 [0;31m），避免写进下载历史。"""
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _raise_if_stopped(stop_evt):
+    if stop_evt is not None and stop_evt.is_set():
+        raise DownloadCancelled("下载已停止")
 
 
 def _as_bool(value, default=True):
@@ -184,8 +194,19 @@ def _convert_json_cookies(src):
         value = str(c.get("value", "")).replace("\t", "").replace("\n", "").replace("\r", "")
         lines.append("\t".join([d, include, path, secure, expiry, name, value]))
     fd, tmp = tempfile.mkstemp(prefix="hls_cookies_", suffix=".txt")
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(lines) + "\n")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write("\n".join(lines) + "\n")
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     return tmp
 
 
@@ -197,6 +218,25 @@ def _ensure_ext(name):
     if any(name.lower().endswith(e) for e in _VIDEO_EXTS):
         return name
     return name + ".mp4"
+
+
+def _move_no_replace(src, dst):
+    """同盘原子无覆盖发布：Windows 用 rename，POSIX 用硬链接。"""
+    if os.name == "nt":
+        try:
+            os.rename(src, dst)
+        except FileExistsError:
+            return False
+        return True
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        return False
+    try:
+        os.unlink(src)
+    except OSError:
+        pass  # 目标已完整发布，源文件由 staging 的 finally 清理
+    return True
 
 
 def _move_to_final(src, out_dir, overwrite):
@@ -213,17 +253,14 @@ def _move_to_final(src, out_dir, overwrite):
         if existed:
             print(f"提示：{basename} 已存在，已覆盖")
         return dst
-    if not os.path.exists(dst):
-        os.replace(src, dst)
-        return dst
     root, ext = os.path.splitext(basename)
-    i = 1
+    i = 0
     while True:
-        cand = f"{root} ({i}){ext}"
+        cand = basename if i == 0 else f"{root} ({i}){ext}"
         cand_path = os.path.join(out_dir, cand)
-        if not os.path.exists(cand_path):
-            os.replace(src, cand_path)
-            print(f"提示：{basename} 已存在，改存为 {cand}")
+        if _move_no_replace(src, cand_path):
+            if i:
+                print(f"提示：{basename} 已存在，改存为 {cand}")
             return cand_path
         i += 1
 
@@ -247,7 +284,7 @@ def _read_batch_file(path):
 
 
 def _write_failed_list(path, items):
-    """把最终仍失败的条目写成失败清单，每行 "URL [文件名]"，可直接回喂 --batch。"""
+    """把最终仍失败的条目写成脱敏清单，每行 "URL [文件名]"。"""
     try:
         with open(path, "w", encoding="utf-8") as f:
             for url, name in items:
@@ -264,7 +301,7 @@ def _retry_pending(download_one, pending, retries, stop_evt=None):
     """队列式重试：对 pending 里的条目做最多 retries 轮，成功移出队列。
 
     download_one 签名为 (url, name) -> error（None 表示成功）。
-    stop_evt 可选：置位后立即停止后续重试（未重试的条目原样保留）。
+    stop_evt 可选：取消时返回已成功数，未尝试条目不计入失败。
     返回 (ok 增加数, 最终仍失败的 items)。
     """
     ok = 0
@@ -275,7 +312,10 @@ def _retry_pending(download_one, pending, retries, stop_evt=None):
         for url, name in pending:
             if stop_evt is not None and stop_evt.is_set():
                 break  # 用户停止：剩余条目不再尝试
-            err = download_one(url, name)
+            try:
+                err = download_one(url, name)
+            except DownloadCancelled:
+                return ok, []
             if err is None:
                 ok += 1
             else:
@@ -306,7 +346,7 @@ def _format_history_line(entry):
     detail = _redact_url(detail)
     if len(detail) > MAX_HISTORY_DETAIL:
         detail = detail[:MAX_HISTORY_DETAIL] + "…"
-    mark = "[成功]" if status == "success" else "[失败]"
+    mark = "[成功]" if status == "success" else ("[取消]" if status == "cancelled" else "[失败]")
     return _strip_ansi(f"{time} {mark} {title} (id={vid}) | {url} | {detail}")
 
 
@@ -363,10 +403,11 @@ def _parse_args():
     return parser.parse_args()
 
 
-def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwrite, want_name, log=print):
+def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwrite, want_name, log=print, stop_evt=None):
     """下载单个 URL，落到 out_dir（同名加序号/覆盖）。返回 (entry, error)。
 
     error 为 None 表示成功，否则为捕获到的异常（已写失败历史）。
+    stop_evt 置位时抛 DownloadCancelled，并清理 staging。
     """
     entry = {
         "time": datetime.now().isoformat(timespec="seconds"),
@@ -378,33 +419,43 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
         "out_dir": out_dir,
     }
 
-    # 下载到同盘 staging 目录，保证 move 原子、不会留下半成品
-    staging_dir = tempfile.mkdtemp(dir=out_dir, prefix=".hls_staging_")
-    opts = dict(ydl_opts)
-    if want_name:
-        # 只取文件名，防止 -o 里的绝对路径/上级目录逃出 staging
-        final_name = _ensure_ext(os.path.basename(want_name))
-        opts["outtmpl"] = os.path.join(staging_dir, final_name)
-        # 用户指定了扩展名时，让 ffmpeg 转封装成对应容器
-        ext = os.path.splitext(final_name)[1].lstrip(".")
-        if ext:
-            opts["merge_output_format"] = ext
-    else:
-        opts["outtmpl"] = os.path.join(staging_dir, "%(title).180B [%(id)s].%(ext)s")
-
+    _raise_if_stopped(stop_evt)
     import yt_dlp  # 已由 main() 先调用 _setup_ytdlp() 保证可导入
 
+    # 下载到同盘 staging 目录，保证 move 原子、不会留下半成品
+    staging_dir = tempfile.mkdtemp(dir=out_dir, prefix=".hls_staging_")
     error = None
     try:
+        opts = dict(ydl_opts)
+        if want_name:
+            # 只取文件名，防止 -o 里的绝对路径/上级目录逃出 staging
+            final_name = _ensure_ext(os.path.basename(want_name))
+            opts["outtmpl"] = os.path.join(staging_dir, final_name)
+            # 用户指定了扩展名时，让 ffmpeg 转封装成对应容器
+            ext = os.path.splitext(final_name)[1].lstrip(".")
+            if ext:
+                opts["merge_output_format"] = ext
+        else:
+            opts["outtmpl"] = os.path.join(staging_dir, "%(title).180B [%(id)s].%(ext)s")
+
+        if stop_evt is not None:
+            def check_stop(_):
+                _raise_if_stopped(stop_evt)
+
+            hooks = list(opts.get("progress_hooks") or [])
+            opts["progress_hooks"] = [check_stop, *hooks]
+
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url=url, download=True)
 
+        _raise_if_stopped(stop_evt)
         final_path = None
         downloaded = info.get("requested_downloads") if isinstance(info, dict) else None
         if downloaded:
             for d in downloaded:
                 src = d.get("filepath") or d.get("filename")
                 if src and os.path.isfile(src):
+                    _raise_if_stopped(stop_evt)
                     p = _move_to_final(src, out_dir, overwrite)
                     final_path = final_path or p
         # 回退：拿不到 requested_downloads 时，扫 staging 里的成品文件
@@ -412,6 +463,7 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
             for fn in sorted(os.listdir(staging_dir)):
                 src = os.path.join(staging_dir, fn)
                 if os.path.isfile(src):
+                    _raise_if_stopped(stop_evt)
                     p = _move_to_final(src, out_dir, overwrite)
                     final_path = final_path or p
 
@@ -424,6 +476,10 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
             log(f"已下载: {final_path}")
         else:
             log(f"完成，输出目录: {out_dir}")
+    except DownloadCancelled as e:
+        entry["status"] = "cancelled"
+        entry["error"] = str(e)
+        raise
     except Exception as e:
         entry["status"] = "failed"
         entry["error"] = str(e)
@@ -439,16 +495,16 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
 def _run_single(url, name, ydl_opts, out_dir, history_enabled, history_file, overwrite, retries, log=print, stop_evt=None):
     """单条下载，失败后额外重试 retries 次。返回 error（None 表示成功）。
 
-    stop_evt 可选：置位后停止后续重试。
+    stop_evt 可选：置位时抛 DownloadCancelled。
     """
     def _dl(u, n):
         return _download_one(u, ydl_opts, out_dir, history_enabled,
-                             history_file, overwrite, n, log=log)[1]
+                             history_file, overwrite, n, log=log, stop_evt=stop_evt)[1]
+    _raise_if_stopped(stop_evt)
     err = _dl(url, name)
     attempt = 1
     while err is not None and attempt <= retries:
-        if stop_evt is not None and stop_evt.is_set():
-            break
+        _raise_if_stopped(stop_evt)
         attempt += 1
         log(f"第 {attempt - 1} 次重试: {url}")
         err = _dl(url, name)
@@ -462,23 +518,37 @@ def _run_batch(items, ydl_opts, out_dir, history_enabled, history_file, overwrit
     """
     def _dl(u, n):
         return _download_one(u, ydl_opts, out_dir, history_enabled,
-                             history_file, overwrite, n, log=log)[1]
+                             history_file, overwrite, n, log=log, stop_evt=stop_evt)[1]
     ok = fail = 0
     pending = []
     for i, (url, name) in enumerate(items, 1):
         if stop_evt is not None and stop_evt.is_set():
             break  # 停止：剩余条目不下载、不记失败
         log(f"[{i}/{len(items)}] 开始下载: {url}")
-        err = _dl(url, name)
+        try:
+            err = _dl(url, name)
+        except DownloadCancelled:
+            log("已停止。")
+            return ok, 0, None
         if err is None:
             ok += 1
         else:
             pending.append((url, name))
             log(f"[{i}/{len(items)}] 下载失败: {url}（{err}）")
+    if stop_evt is not None and stop_evt.is_set():
+        log("已停止。")
+        return ok, 0, None
     if pending and retries > 0:
         log(f"重试失败条目（最多 {retries} 轮）…")
-        gained, pending = _retry_pending(_dl, pending, retries, stop_evt)
+        try:
+            gained, pending = _retry_pending(_dl, pending, retries, stop_evt)
+        except DownloadCancelled:
+            log("已停止。")
+            return ok, 0, None
         ok += gained
+        if stop_evt is not None and stop_evt.is_set():
+            log("已停止。")
+            return ok, 0, None
     fail = len(pending)
     failed_file = None
     if pending:
@@ -520,7 +590,10 @@ def main():
     args = _parse_args()
     config = _load_config()
 
-    _setup_ytdlp()
+    try:
+        _setup_ytdlp()
+    except RuntimeError as e:
+        sys.exit(str(e))
 
     ffmpeg_dir = _find_ffmpeg_dir()
     if not ffmpeg_dir:
@@ -534,77 +607,77 @@ def main():
 
     # --cookies 指向 Cookie-Editor 的 JSON 导出时，自动转成 Netscape 临时文件
     tmp_cookie = None
-    if cookies and _is_json_cookie_file(cookies):
-        tmp_cookie = _convert_json_cookies(cookies)
-        if not tmp_cookie:
-            sys.exit("错误：cookies 文件是 JSON 格式但结构不合法，无法转换（应为 Cookie-Editor 导出格式）。")
-        print("提示：检测到 JSON 格式 cookies，已自动转换为 Netscape 格式。")
-        cookies = tmp_cookie
-
-    user_agent = args.user_agent or config.get("user_agent")
-    referer = args.referer or config.get("referer")
-    proxy = args.proxy or config.get("proxy")
-
-    out_dir = _resolve_path(args.out_dir or config.get("out_dir"),
-                            os.path.join(DATA_DIR, "downloads"))
-    history_file = _resolve_path(args.history_file or config.get("history_file"),
-                                 DEFAULT_HISTORY_FILE)
-    # 历史记录开关：config 的 history 为 false/"false" 或命令行 --no-history 时关闭
-    history_enabled = _as_bool(config.get("history", True)) and not args.no_history
-
-    # 重试次数：命令行 > config.json > 默认 3
-    retries = args.retries
-    if retries is None:
-        try:
-            retries = int(config.get("retries", DEFAULT_RETRIES))
-        except (TypeError, ValueError):
-            sys.exit("错误：config.json 的 retries 必须是整数（如 3），当前值无效。")
-    if retries < 0:
-        sys.exit("错误：--retries 不能为负数。")
-    if retries > MAX_RETRIES:
-        sys.exit(f"错误：--retries 不能超过 {MAX_RETRIES}。")
-
-    os.makedirs(out_dir, exist_ok=True)
-
-    ydl_opts = {
-        "ffmpeg_location": ffmpeg_dir,
-        # m3u8 单流(HLS 多为音视频混合 TS)用 best 最稳
-        "format": "best",
-        # 下载的 TS 由 ffmpeg 转封装成 mp4
-        "merge_output_format": "mp4",
-        "noplaylist": True,
-        "concurrent_fragment_downloads": 16,
-        # 外层 _run_single/_run_batch 已实现重试，关闭 yt-dlp 内层重试避免次数相乘
-        "retries": 0,
-        "fragment_retries": 0,
-    }
-
-    # 登录态
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
-    if browser:
-        ydl_opts["cookiesfrombrowser"] = (browser,)
-
-    # 防盗链 / 覆盖 UA
-    headers = {}
-    if user_agent:
-        headers["User-Agent"] = user_agent
-    if referer:
-        headers["Referer"] = referer
-    if headers:
-        ydl_opts["http_headers"] = headers
-
-    # 代理
-    if proxy:
-        ydl_opts["proxy"] = proxy
-
-    # 参数互斥校验
-    if args.batch and args.url:
-        sys.exit("错误：url 与 --batch 不能同时使用。")
-    if args.batch and args.output:
-        sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
-
     try:
+        if cookies and _is_json_cookie_file(cookies):
+            tmp_cookie = _convert_json_cookies(cookies)
+            if not tmp_cookie:
+                sys.exit("错误：cookies 文件是 JSON 格式但结构不合法，无法转换（应为 Cookie-Editor 导出格式）。")
+            print("提示：检测到 JSON 格式 cookies，已自动转换为 Netscape 格式。")
+            cookies = tmp_cookie
+
+        user_agent = args.user_agent or config.get("user_agent")
+        referer = args.referer or config.get("referer")
+        proxy = args.proxy or config.get("proxy")
+
+        out_dir = _resolve_path(args.out_dir or config.get("out_dir"),
+                                os.path.join(DATA_DIR, "downloads"))
+        history_file = _resolve_path(args.history_file or config.get("history_file"),
+                                     DEFAULT_HISTORY_FILE)
+        # 历史记录开关：config 的 history 为 false/"false" 或命令行 --no-history 时关闭
+        history_enabled = _as_bool(config.get("history", True)) and not args.no_history
+
+        # 重试次数：命令行 > config.json > 默认 3
+        retries = args.retries
+        if retries is None:
+            try:
+                retries = int(config.get("retries", DEFAULT_RETRIES))
+            except (TypeError, ValueError):
+                sys.exit("错误：config.json 的 retries 必须是整数（如 3），当前值无效。")
+        if retries < 0:
+            sys.exit("错误：--retries 不能为负数。")
+        if retries > MAX_RETRIES:
+            sys.exit(f"错误：--retries 不能超过 {MAX_RETRIES}。")
+
+        os.makedirs(out_dir, exist_ok=True)
+
+        ydl_opts = {
+            "ffmpeg_location": ffmpeg_dir,
+            # m3u8 单流(HLS 多为音视频混合 TS)用 best 最稳
+            "format": "best",
+            # 下载的 TS 由 ffmpeg 转封装成 mp4
+            "merge_output_format": "mp4",
+            "noplaylist": True,
+            "concurrent_fragment_downloads": 16,
+            # 外层 _run_single/_run_batch 已实现重试，关闭 yt-dlp 内层重试避免次数相乘
+            "retries": 0,
+            "fragment_retries": 0,
+        }
+
+        # 登录态
+        if cookies:
+            ydl_opts["cookiefile"] = cookies
+        if browser:
+            ydl_opts["cookiesfrombrowser"] = (browser,)
+
+        # 防盗链 / 覆盖 UA
+        headers = {}
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if referer:
+            headers["Referer"] = referer
+        if headers:
+            ydl_opts["http_headers"] = headers
+
+        # 代理
+        if proxy:
+            ydl_opts["proxy"] = proxy
+
+        # 参数互斥校验
+        if args.batch and args.url:
+            sys.exit("错误：url 与 --batch 不能同时使用。")
+        if args.batch and args.output:
+            sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
+
         if not args.batch and not args.url:
             # 无参数双击：进入交互式引导，而非报错闪退
             _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retries)

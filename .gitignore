@@ -9,6 +9,9 @@ config.json
 download_history.log
 failed_downloads.txt
 
+# 运行时数据（历史库、日志，含下载记录等隐私，不进 git）
+data/
+
 # cookie 导出文件（含登录态，隐私，不进 git）
 conf/
 *.cookies.json

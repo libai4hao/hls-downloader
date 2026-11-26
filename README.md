@@ -86,8 +86,8 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 ## 配置与下载历史
 
 - **配置**：把 [config.example.json](config.example.json) 复制为 `config.json`（脚本同目录），脚本启动时自动读取。优先级：命令行参数 > config.json > 内置默认值。
-- **下载历史**：默认每次下载（成功/失败）追加一行可读文本到 `download_history.log`（脚本同目录，txt/log 格式）。可用 config 的 `history: false` 全局关闭，或用 `--no-history` 单次关闭；路径可用 config 的 `history_file` 或 `--history-file` 指定。
-- **失败清单**：批量下载重试耗尽后仍失败的条目写入 `failed_downloads.txt`（脚本同目录，每行 `URL [文件名]`，可直接回喂 `--batch` 补下）。
+- **下载历史**：默认每次下载（成功/失败/取消）追加一行可读文本到 `download_history.log`（脚本同目录，txt/log 格式）。可用 config 的 `history: false` 全局关闭，或用 `--no-history` 单次关闭；路径可用 config 的 `history_file` 或 `--history-file` 指定。
+- **失败清单**：批量下载重试耗尽后仍失败的条目写入 `failed_downloads.txt`（脚本同目录，每行 `URL [文件名]`）。查询串中的签名会脱敏；含签名查询参数的条目需使用原始 URL 重新下载。
 - 功能规划见 [doc/功能清单.md](doc/功能清单.md)、[doc/迭代计划.md](doc/迭代计划.md)。
 
 ## 打包（可选）

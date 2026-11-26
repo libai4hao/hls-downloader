@@ -14,8 +14,8 @@
 
 - 不做 DRM（Widevine/PlayReady）解密。
 - 不做 curl_cffi / TLS 指纹伪装（已评估对 Cloudflare Turnstile 无效）。
-- 不做 GUI 自动化测试（tkinter 不适合 headless 单测）。
-- 不改动现有 CLI 参数语义、默认值、历史记录格式。
+- 不做端到端 GUI 自动化测试；仅对配置目录、取消状态、临时 cookie 清理和关闭超时做 pytest 逻辑单测。
+- 保持现有 CLI 参数语义和默认值；历史记录新增取消状态和 URL 查询串脱敏。
 - 不把 ffplay / ffmpeg 文档打进 exe（只打 `ffmpeg.exe` + `ffprobe.exe`，后者为 yt-dlp FixupM3u8 转封装读元数据所必需）。
 
 ## 3. 用户已确认的决策
@@ -32,13 +32,13 @@
 ### 4.1 组件划分
 
 ```
-hls_download.py      现有，改造约 +60 行：
+hls_download.py      现有，CLI 入口 + 下载核心：
                      - 顶部加 frozen 资源/数据目录区分
                      - _find_ffmpeg_dir / _setup_ytdlp 改走资源目录
                      - _download_one 加 log 回调 + logger 透传
                      - 抽 _run_single / _run_batch（下载编排下放到可复用函数）
                      - main() 变薄壳，调用 _run_single / _run_batch
-gui.py               新增，tkinter 单文件（约 250 行）：
+gui.py               新增，tkinter 单文件：
                      主窗口 + 下载线程 + queue 日志回显 + 停止
 build_cli.spec       新增，PyInstaller 打包 CLI exe
 build_gui.spec       新增，PyInstaller 打包 GUI exe
@@ -88,14 +88,14 @@ doc/ 7 份文档        同步（含本文档、迭代计划 V3.0 标记完成�
       → 组 ydl_opts（proxy/cookies/UA/logger）
       → 单条走 _run_single、批量走 _run_batch（want_name = 文件名或批量行内文件名）
       → 日志经 queue.Queue → 主线程 root.after(100, poll) 轮询刷新文本框
-  → 结束回写状态栏「成功/失败」，批量失败提示「详见 failed_downloads.txt」
+  → 结束回写状态栏「成功/失败/已停止」，批量失败提示「详见 failed_downloads.txt」
 ```
 
 ### 5.3 线程模型（tkinter 非线程安全）
 
 - 下载在后台 `threading.Thread` 执行，tkinter 主线程只负责渲染与轮询 queue。
 - 所有对控件的写操作都通过 `root.after` 回到主线程。
-- 「停止」设置一个 `threading.Event`，在日志轮询处检查；yt-dlp 片段下载不支持优雅中断，停止语义为「停止后续重试/后续条目 + 清理当前 staging」（下载中的当前片段会在其内部循环结束后退出）。
+- 「停止」设置一个 `threading.Event`，下载进度回调会检查该事件并抛受控取消异常，随后清理 staging；单条与批量都区分「已停止」和「成功」。关闭窗口等待 worker 收尾，超过 30 秒仍未退出时强制关闭。
 
 ## 6. 错误处理
 
