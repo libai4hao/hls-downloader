@@ -2,7 +2,8 @@ import requests, struct, sys, os, re, time, threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-BASE = "https://halas-monsl.mushroomtrack.com/hls/L5XLkVjOpKO_fzZ3NODtcA/1794079359/18000/18450/"
+# 把 BASE 换成你自己的 HLS 基址；不要在仓库里提交带签名的真实链接。
+BASE = "https://example.com/hls/<TOKEN>/<EXPIRES>/<START>/<END>/"
 M3U8 = BASE + "18450.m3u8"
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUTDIR = os.path.join(os.path.dirname(HERE), "downloads")
@@ -34,7 +35,7 @@ log(f"segments={len(segs)}  key_uri={key_uri}  iv={hex(iv)}")
 # ---- key ----
 key = requests.get(BASE + key_uri, headers=HDR, timeout=30).content
 assert len(key) == 16, f"key size {len(key)}"
-log(f"key={key.hex()}")
+log(f"key bytes={len(key)}")
 ivb = iv.to_bytes(16, "big")
 
 os.makedirs(SEGDIR, exist_ok=True)

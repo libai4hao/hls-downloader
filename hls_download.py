@@ -54,6 +54,8 @@ CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
 DEFAULT_HISTORY_FILE = os.path.join(DATA_DIR, "download_history.log")
 DEFAULT_FAILED_FILE = os.path.join(DATA_DIR, "failed_downloads.txt")
 DEFAULT_RETRIES = 3
+MAX_RETRIES = 10
+MAX_HISTORY_DETAIL = 200
 
 # 视为「已含扩展名」的音视频后缀，命中则文件名原样不补 .mp4
 _VIDEO_EXTS = (
@@ -121,6 +123,22 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
+def _as_bool(value, default=True):
+    """把配置里的布尔值（可能是字符串 "false"/"true"）规范成真正的 bool。"""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in ("false", "0", "no", "off"):
+            return False
+        if v in ("true", "1", "yes", "on"):
+            return True
+        return default
+    return bool(value)
+
+
 def _is_json_cookie_file(path):
     """判断 --cookies 指向的文件是否为 Cookie-Editor 导出的 JSON 格式。"""
     try:
@@ -154,9 +172,17 @@ def _convert_json_cookies(src):
         path = c.get("path") or "/"
         secure = "TRUE" if c.get("secure") else "FALSE"
         exp = c.get("expirationDate")
-        expiry = "0" if (c.get("session") or exp is None) else str(int(float(exp)))
-        lines.append("\t".join([d, include, path, secure, expiry,
-                                c.get("name", ""), c.get("value", "")]))
+        if c.get("session") or exp is None:
+            expiry = "0"
+        else:
+            try:
+                expiry = str(int(float(exp)))
+            except (TypeError, ValueError):
+                expiry = "0"
+        # Netscape 格式用 \t 分列：值里的控制字符会破坏列结构，先清掉
+        name = str(c.get("name", "")).replace("\t", "").replace("\n", "").replace("\r", "")
+        value = str(c.get("value", "")).replace("\t", "").replace("\n", "").replace("\r", "")
+        lines.append("\t".join([d, include, path, secure, expiry, name, value]))
     fd, tmp = tempfile.mkstemp(prefix="hls_cookies_", suffix=".txt")
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
@@ -225,7 +251,8 @@ def _write_failed_list(path, items):
     try:
         with open(path, "w", encoding="utf-8") as f:
             for url, name in items:
-                f.write(url if not name else f"{url} {name}")
+                safe_url = _redact_url(url)
+                f.write(safe_url if not name else f"{safe_url} {name}")
                 f.write("\n")
     except OSError as e:
         print(f"警告：写入失败清单失败：{e}")
@@ -247,15 +274,23 @@ def _retry_pending(download_one, pending, retries, stop_evt=None):
         still = []
         for url, name in pending:
             if stop_evt is not None and stop_evt.is_set():
-                still.append((url, name))
-                continue
+                break  # 用户停止：剩余条目不再尝试
             err = download_one(url, name)
             if err is None:
                 ok += 1
             else:
                 still.append((url, name))
         pending = still
+    if stop_evt is not None and stop_evt.is_set():
+        return ok, []  # 停止时不把未尝试条目计为失败
     return ok, pending
+
+
+def _redact_url(url):
+    """去掉签名查询串，避免把一次性 token 写进历史/失败清单。"""
+    if not url:
+        return url
+    return re.sub(r"\?.*$", "?<redacted>", url)
 
 
 def _format_history_line(entry):
@@ -263,10 +298,14 @@ def _format_history_line(entry):
     status = entry.get("status", "?")
     title = entry.get("title") or "-"
     vid = entry.get("id") or "-"
-    url = entry.get("url", "")
+    url = _redact_url(entry.get("url", ""))
     time = entry.get("time", "")
     # 成功时标文件，失败时标错误
     detail = entry.get("filepath") or entry.get("error") or entry.get("out_dir", "")
+    detail = _strip_ansi(str(detail)).replace("\n", " ").replace("\r", " ")
+    detail = _redact_url(detail)
+    if len(detail) > MAX_HISTORY_DETAIL:
+        detail = detail[:MAX_HISTORY_DETAIL] + "…"
     mark = "[成功]" if status == "success" else "[失败]"
     return _strip_ansi(f"{time} {mark} {title} (id={vid}) | {url} | {detail}")
 
@@ -343,7 +382,8 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
     staging_dir = tempfile.mkdtemp(dir=out_dir, prefix=".hls_staging_")
     opts = dict(ydl_opts)
     if want_name:
-        final_name = _ensure_ext(want_name)
+        # 只取文件名，防止 -o 里的绝对路径/上级目录逃出 staging
+        final_name = _ensure_ext(os.path.basename(want_name))
         opts["outtmpl"] = os.path.join(staging_dir, final_name)
         # 用户指定了扩展名时，让 ffmpeg 转封装成对应容器
         ext = os.path.splitext(final_name)[1].lstrip(".")
@@ -509,8 +549,8 @@ def main():
                             os.path.join(DATA_DIR, "downloads"))
     history_file = _resolve_path(args.history_file or config.get("history_file"),
                                  DEFAULT_HISTORY_FILE)
-    # 历史记录开关：config 的 history 为 false 或命令行 --no-history 时关闭
-    history_enabled = bool(config.get("history", True)) and not args.no_history
+    # 历史记录开关：config 的 history 为 false/"false" 或命令行 --no-history 时关闭
+    history_enabled = _as_bool(config.get("history", True)) and not args.no_history
 
     # 重试次数：命令行 > config.json > 默认 3
     retries = args.retries
@@ -521,6 +561,8 @@ def main():
             sys.exit("错误：config.json 的 retries 必须是整数（如 3），当前值无效。")
     if retries < 0:
         sys.exit("错误：--retries 不能为负数。")
+    if retries > MAX_RETRIES:
+        sys.exit(f"错误：--retries 不能超过 {MAX_RETRIES}。")
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -532,8 +574,9 @@ def main():
         "merge_output_format": "mp4",
         "noplaylist": True,
         "concurrent_fragment_downloads": 16,
-        "retries": 10,
-        "fragment_retries": 10,
+        # 外层 _run_single/_run_batch 已实现重试，关闭 yt-dlp 内层重试避免次数相乘
+        "retries": 0,
+        "fragment_retries": 0,
     }
 
     # 登录态
@@ -560,18 +603,19 @@ def main():
         sys.exit("错误：url 与 --batch 不能同时使用。")
     if args.batch and args.output:
         sys.exit("错误：--output 与 --batch 不能同时使用（批量时文件名写在每行链接后面）。")
-    if not args.batch and not args.url:
-        # 无参数双击：进入交互式引导，而非报错闪退
-        _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retries)
-        return
 
     try:
-        if args.batch:
+        if not args.batch and not args.url:
+            # 无参数双击：进入交互式引导，而非报错闪退
+            _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retries)
+        elif args.batch:
             items = _read_batch_file(args.batch)
             if not items:
                 sys.exit("错误：批量文件为空或无可下载的 URL。")
-            _run_batch(items, ydl_opts, out_dir, history_enabled,
-                       history_file, args.overwrite, retries)
+            ok, fail, _ = _run_batch(items, ydl_opts, out_dir, history_enabled,
+                                     history_file, args.overwrite, retries)
+            if fail:
+                sys.exit(1)  # 批量有失败时以非零码退出，便于脚本/CI 感知
         else:
             err = _run_single(args.url, args.output, ydl_opts, out_dir,
                               history_enabled, history_file, args.overwrite, retries)

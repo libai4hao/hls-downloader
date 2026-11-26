@@ -42,9 +42,10 @@ class App:
         self.stop_evt = threading.Event()
         self.worker = None
         self._progress_title = None
-        self._progress_prefix = "下载中："
+        self._closing = False
 
         self._build_ui()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(100, self._poll_queue)
 
     def _build_ui(self):
@@ -123,6 +124,10 @@ class App:
                     self._append_log(item)
         except queue.Empty:
             pass
+        if self._closing and self.worker and not self.worker.is_alive():
+            # worker 已收尾（临时 cookie 等已清理），此时再销毁窗口
+            self.root.destroy()
+            return
         self.root.after(100, self._poll_queue)
 
     def _set_progress(self, d):
@@ -162,7 +167,7 @@ class App:
         title = (d.get("info_dict") or {}).get("title")
         if title:
             self._progress_title = title
-        prefix = self._progress_prefix
+        prefix = d.get("_prefix") or "下载中："
         live_done = (d.get("downloaded_bytes") or 0) / 1048576  # MB
         if self._progress_title:
             if pct is not None:
@@ -204,12 +209,26 @@ class App:
         self.stop_evt.set()
         self.q.put(("__status__", "已请求停止（当前片段结束后生效）…"))
 
-    def _progress_hook(self, d):
-        """yt-dlp progress_hooks 回调（worker 线程）：把下载进度推到主线程。"""
+    def _on_close(self):
+        """关闭窗口：下载中先请求停止，等 worker 收尾并清理临时文件后再销毁窗口。"""
+        if self.worker and self.worker.is_alive():
+            self._closing = True
+            self.stop_evt.set()
+            self.status_var.set("正在停止并清理，请稍候…")
+        else:
+            self.root.destroy()
+
+    def _progress_hook(self, d, prefix="下载中："):
+        """yt-dlp progress_hooks 回调（worker 线程）：把下载进度推到主线程。
+
+        前缀随进度 payload 一起传入，避免 worker 写主线程属性造成竞态。
+        """
         if d.get("status") in ("downloading", "finished"):
-            self.q.put(("__progress__", d))
+            self.q.put(("__progress__", {**d, "_prefix": prefix}))
 
     def _download(self, lines, out_dir, name, cookies, proxy, is_batch):
+        prefix = "下载中："
+
         def log(msg):
             self.q.put(msg)
 
@@ -223,18 +242,17 @@ class App:
                 fail("错误：找不到 ffmpeg。请安装 ffmpeg 或设置环境变量 FFMPEG_LOCATION。")
                 return
 
-            os.makedirs(out_dir, exist_ok=True)
-
             ydl_opts = {
                 "ffmpeg_location": ffmpeg_dir,
                 "format": "best",
                 "merge_output_format": "mp4",
                 "noplaylist": True,
                 "concurrent_fragment_downloads": 16,
-                "retries": 10,
-                "fragment_retries": 10,
+                # 重试由外层 _run_single/_run_batch 控制，yt-dlp 内部不再叠加
+                "retries": 0,
+                "fragment_retries": 0,
                 "logger": _build_logger(self.q),
-                "progress_hooks": [self._progress_hook],
+                "progress_hooks": [lambda d: self._progress_hook(d, prefix)],
             }
 
             tmp_cookie = None
@@ -251,13 +269,16 @@ class App:
                 ydl_opts["proxy"] = proxy
 
             config = h._load_config()
-            history_enabled = bool(config.get("history", True))
-            history_file = h.DEFAULT_HISTORY_FILE
+            history_enabled = h._as_bool(config.get("history", True))
+            history_file = h._resolve_path(config.get("history_file"), h.DEFAULT_HISTORY_FILE)
+            out_dir = h._resolve_path(config.get("out_dir"), out_dir) if not self.out_var.get().strip() else out_dir
             retries = 3
             try:
                 retries = int(config.get("retries", 3))
             except (TypeError, ValueError):
                 retries = 3
+            retries = max(0, min(retries, h.MAX_RETRIES))
+            os.makedirs(out_dir, exist_ok=True)
 
             try:
                 if is_batch:
@@ -271,9 +292,10 @@ class App:
                     total = len(items)
 
                     def batch_log(msg):
+                        nonlocal prefix
                         m = re.match(r"\[(\d+)/(\d+)\] 开始下载", msg)
                         if m:
-                            self._progress_prefix = f"[{m.group(1)}/{total}] 正在下载："
+                            prefix = f"[{m.group(1)}/{total}] 正在下载："
                             self.q.put(("__progress__", {"_reset": True}))
                         self.q.put(msg)
 
@@ -288,7 +310,6 @@ class App:
                     else:
                         self.q.put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"))
                 else:
-                    self._progress_prefix = "下载中："
                     self.q.put(("__status__", "开始下载…"))
                     err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
                                         history_file, False, retries, log=log,

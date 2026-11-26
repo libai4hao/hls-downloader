@@ -100,6 +100,8 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 .venv_build\Scripts\pyinstaller --clean --noconfirm build_gui.spec
 ```
 
+> ℹ️ **yt-dlp 版本来源**：本地打包（上面的 spec）会打包你环境里已安装的 yt-dlp——可以是系统装的，也可以是脚本同目录/上级的 `ytdlp_lib/`（nightly 构建，如 `2026.09.27.232945`）；而 **GitHub Actions 自动发布**（打 tag `v*` 触发）固定从 PyPI 安装稳定版（`yt-dlp==2026.11.23`），两者可能不是同一个构建。这是刻意取舍：CI 用可复现的稳定版，本地可用较新的 nightly。
+
 产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
 - `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
 - `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
