@@ -54,20 +54,19 @@ git push origin main --tags
 
 ## 4. 自动构建与发布（无需干预）
 
-推送 tag 后 GitHub Actions 自动执行 `build` 工作流：
+推送 tag 后 GitHub Actions 并行执行 `build-full` / `build-lite` 两个 job，再汇总发布：
 
-1. `windows-latest` runner 上装 Python 3.11 + pyinstaller + yt-dlp；
-2. 下载 ffmpeg（gyan.dev essentials）解压成 `ffmpeg-*/bin/` 结构；
-3. `build_cli.spec` / `build_gui.spec` / `build_cli_lite.spec` / `build_gui_lite.spec` 各自打 onedir 包（含图标 + 版本信息；lite 版不含 ffmpeg）；
-4. `Compress-Archive` 压成 `hls_download.zip` / `hls_download_gui.zip` / `hls_download_lite.zip` / `hls_download_gui_lite.zip`；
-5. 上传 artifact；
-6. `softprops/action-gh-release` 用 tag 名创建 release，附四个 zip，自动生成 release notes。
+1. 两个 job 并行跑在各自 `windows-latest` runner 上（墙钟约减半）：装 Python 3.11 + pyinstaller + yt-dlp，先跑 pytest；
+2. **build-full**：下载 ffmpeg（gyan.dev essentials）解压成 `ffmpeg-*/bin/` 结构，`build_cli.spec` / `build_gui.spec` 打含 ffmpeg 的包；**build-lite**：免 ffmpeg 下载，`build_cli_lite.spec` / `build_gui_lite.spec` 打 lite 包（含图标 + 版本信息）；
+3. 各自 `Compress-Archive` 压 zip，分别上传 artifact `hls-downloader-full` / `hls-downloader-lite`；
+4. `release` job（仅 tag 触发）合并两个 artifact，`softprops/action-gh-release` 用 tag 名创建 release，附四个 zip，自动生成 release notes。
 
 ## 5. 验证
 
-- 打开仓库 **Actions** 页，确认 `build` 工作流绿色通过（无 Node 20 弃用 warning）。
+- 打开仓库 **Actions** 页，确认 `build-full` / `build-lite` 两个 job 绿色通过（无 Node 20 弃用 warning）。
 - 打开 **Releases** 页，确认新 tag 对应 release 已出现，且附 `hls_download.zip` + `hls_download_gui.zip` + `hls_download_lite.zip` + `hls_download_gui_lite.zip`。
 - 下载 `hls_download_gui.zip`，解压后双击 `hls_download_gui.exe`，确认：图标正常显示、启动秒开、下载进度条走动。
+- 下载 `hls_download_lite.zip`，解压后在装好 ffmpeg（PATH 或 `FFMPEG_LOCATION`）的机器上跑一次 `hls_download.exe <m3u8地址>`，确认能下载；在没装 ffmpeg 的机器上确认报错文案提示三种解决办法。
 
 ---
 
