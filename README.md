@@ -92,12 +92,15 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 
 ## 打包（可选）
 
-用 PyInstaller 打成**文件夹（onedir）**，双击里面的 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）：
+用 PyInstaller 打成**文件夹（onedir）**，双击里面的 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）。另有 **lite 版**（`*_lite.spec`）：不内置 ffmpeg、体积小，运行时自动探测系统 PATH 或 `FFMPEG_LOCATION`：
 
 ```bat
 :: 在 .venv_build 虚拟环境里装 pyinstaller 后执行
 .venv_build\Scripts\pyinstaller --clean --noconfirm build_cli.spec
 .venv_build\Scripts\pyinstaller --clean --noconfirm build_gui.spec
+:: lite 版（不内置 ffmpeg，运行时用 PATH / FFMPEG_LOCATION 定位）
+.venv_build\Scripts\pyinstaller --clean --noconfirm build_cli_lite.spec
+.venv_build\Scripts\pyinstaller --clean --noconfirm build_gui_lite.spec
 ```
 
 > ℹ️ **yt-dlp 版本来源**：本地打包（上面的 spec）会打包你环境里已安装的 yt-dlp——可以是系统装的，也可以是脚本同目录/上级的 `ytdlp_lib/`（nightly 构建，如 `2026.09.27.232945`）；而 **GitHub Actions 自动发布**（打 tag `v*` 触发）固定从 PyPI 安装稳定版（`yt-dlp==2026.11.23`），两者可能不是同一个构建。这是刻意取舍：CI 用可复现的稳定版，本地可用较新的 nightly。
@@ -105,6 +108,8 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
 - `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
 - `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
+- `dist\hls_download_lite\hls_download.exe` — CLI lite 版（不内置 ffmpeg，需 PATH / `FFMPEG_LOCATION`）
+- `dist\hls_download_gui_lite\hls_download_gui.exe` — GUI lite 版（同上）
 
 > ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
@@ -131,6 +136,8 @@ hls-downloader/
 ├── version_info.txt     # exe 版本信息（公司名/产品名/版本号）
 ├── build_cli.spec       # PyInstaller 打包 CLI（onedir 文件夹）
 ├── build_gui.spec       # PyInstaller 打包 GUI（onedir 文件夹）
+├── build_cli_lite.spec  # PyInstaller 打包 CLI lite（不内置 ffmpeg）
+├── build_gui_lite.spec  # PyInstaller 打包 GUI lite（不内置 ffmpeg）
 ├── doc/                 # 文档目录
 │   ├── 发布SOP.md        # 发布流程（版本号 → 打 tag → 自动构建发布）
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）

@@ -30,7 +30,7 @@ hls_download.py — 加密 HLS 视频下载器（yt-dlp + ffmpeg 封装）
 
 依赖定位（按优先级）：
     yt-dlp ：优先系统已安装，否则用脚本同目录 / 上级目录下的 ytdlp_lib/
-    ffmpeg ：优先环境变量 FFMPEG_LOCATION，否则用脚本同目录 / 上级目录下的 ffmpeg*/bin/
+    ffmpeg ：优先环境变量 FFMPEG_LOCATION，其次脚本同目录 / 上级目录 / 打包内置的 ffmpeg*/bin/，最后回退系统 PATH
 """
 import argparse
 import glob
