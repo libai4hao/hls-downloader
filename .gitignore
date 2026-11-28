@@ -40,3 +40,4 @@ dist/
 build/
 .venv_build/
 *.spec.bak
+.venv/

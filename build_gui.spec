@@ -14,6 +14,8 @@ FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
 if FFMPEG_BIN is None:
     FFMPEG_BIN = next(ROOT.parent.glob("ffmpeg*/bin/ffmpeg.exe"), None)
     FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
+if FFMPEG_BIN is None:
+    print("警告：未找到本地 ffmpeg，本次将打出不含 ffmpeg 的包（运行时需 PATH 或 FFMPEG_LOCATION）；如需内置请用完整版 spec 并准备好 ffmpeg 目录。")
 FFPROBE_BIN = FFMPEG_DIR / "ffprobe.exe" if FFMPEG_DIR and (FFMPEG_DIR / "ffprobe.exe").exists() else None
 
 _yt_datas, _yt_binaries, _yt_hidden = collect_all("yt_dlp")
