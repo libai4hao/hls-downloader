@@ -134,6 +134,22 @@ def _strip_ansi(text):
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
+def _ensure_console_utf8():
+    """把 stdout/stderr 切到 UTF-8。
+
+    Windows 非中文控制台（cp1252/cp437）默认编码装不下中文，打印帮助/报错文案时会抛
+    UnicodeEncodeError 直接崩掉；统一改成 UTF-8 并把不可编码字符降级为替换字符。
+    windowed 打包下 stdout/stderr 为 None，或无 reconfigure 时不处理。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass
+
+
 def _redact_sensitive_text(text):
     """脱敏日志文本中的 URL 凭据参数，避免签名链接/令牌进入 GUI 日志。"""
     sensitive = {"token", "access_token", "refresh_token", "auth", "authorization",
@@ -639,6 +655,7 @@ def _interactive_download(ydl_opts, out_dir, history_enabled, history_file, retr
 
 
 def main():
+    _ensure_console_utf8()
     args = _parse_args()
     config = _load_config()
 

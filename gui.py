@@ -375,6 +375,7 @@ class App:
 
 
 def main():
+    h._ensure_console_utf8()
     root = tk.Tk()
     App(root)
     root.mainloop()

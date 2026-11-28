@@ -12,6 +12,7 @@
 | Cookie JSON 字段校验 | `domain` 拒绝空白字符与 `/`；`path` 必须以 `/` 开头且不含制表符/换行，否则回落 `/`，防止注入额外列破坏 Netscape 结构 |
 | Windows 文件名安全处理 | 新增 `_sanitize_filename`：去路径分隔符、替换 `<>:"/\|?*` 与控制字符、去尾部空格/点、规避 `CON/PRN/AUX/NUL/COM1-9/LPT1-9` 保留名；`_ensure_ext` 统一走该清洗 |
 | URL 敏感参数脱敏 | 新增 `_redact_sensitive_text`：日志与日志框对 `token/access_token/auth/signature/key/password/credential` 等查询参数替换为 `REDACTED`，保留非敏感参数 |
+| 控制台编码兜底 | 新增 `_ensure_console_utf8`：启动时把 stdout/stderr 切到 UTF-8（`errors="replace"`）。非中文/非 UTF-8 控制台（cp1252/cp437）打印中文帮助或报错时本来会 `UnicodeEncodeError` 直接崩掉，该问题由首个 v1.12.0 CI 运行的 `--help` 冒烟暴露，已修复 |
 | CLI / GUI spec 重构 | 改用 `SPECPATH` 定位项目（不再依赖调用者 cwd）；移除 spec 内删除共享 `build/` 的副作用；保留防叠加的同名产物目录清理（改用 `DISTPATH`） |
 | Portable 共享运行时 spec | 新增 `build_portable.spec`：CLI/GUI 两个 EXE 共用一个 `_internal` 运行时，依赖按目标路径去重 |
 | FFmpeg 完整版 / 精简版 | 新增 `HLS_BUNDLE_FFMPEG` 开关（默认 `1` 内置）；完整版缺 `ffmpeg.exe`/`ffprobe.exe` 时构建硬失败，避免打出半成品包；Slim 版要求系统 PATH 同时存在 ffmpeg 与 ffprobe，或 `FFMPEG_LOCATION` |
@@ -22,7 +23,8 @@
 ## 验证
 
 - `python -m py_compile hls_download.py gui.py tests/test_hls_download.py`：通过。
-- `python -m pytest -q`：39 passed，1 skipped（Windows 本机，Python 3.13）。
+- `python -m pytest -q`：41 passed，1 skipped（Windows 本机，Python 3.13）。
+- `PYTHONIOENCODING=cp1252 python hls_download.py --help`：修复前崩在 `UnicodeEncodeError`，修复后正常退出 0（对应 CI 上 CLI/Portable `--help` 冒烟失败的原因）。
 - `yaml.safe_load` 解析 `.github/workflows/release.yml`：7 个 job、release job 依赖四个构建 job，结构正确。
 - 本地实跑 PyInstaller（`HLS_BUNDLE_FFMPEG=0`，输出到临时目录后清理）：
   - `build_cli.spec`：1121 files / 35.5 MB，`_internal` 内无 ffmpeg，`hls_download.exe --help` 正常；

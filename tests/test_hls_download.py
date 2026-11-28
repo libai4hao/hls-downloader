@@ -650,3 +650,24 @@ def test_redact_sensitive_query_parameters_in_log_urls():
     assert "quality=720" in value
     assert "REDACTED" in value
     assert value.endswith(".")
+
+# --- _ensure_console_utf8：非 UTF-8 控制台打印中文不崩 ---
+
+def test_ensure_console_utf8_reconfigures_stdout_and_stderr(monkeypatch):
+    calls = []
+
+    class FakeStream:
+        def reconfigure(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(h.sys, "stdout", FakeStream())
+    monkeypatch.setattr(h.sys, "stderr", FakeStream())
+    h._ensure_console_utf8()
+    assert len(calls) == 2
+    assert all(c["encoding"] == "utf-8" and c["errors"] == "replace" for c in calls)
+
+
+def test_ensure_console_utf8_tolerates_none_and_plain_objects(monkeypatch):
+    monkeypatch.setattr(h.sys, "stdout", None)
+    monkeypatch.setattr(h.sys, "stderr", object())  # 没有 reconfigure
+    h._ensure_console_utf8()  # 不应抛异常
