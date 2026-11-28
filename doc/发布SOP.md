@@ -1,16 +1,17 @@
 # 发布 SOP
 
-`hls-downloader` 的发布流程：确定版本号 → 同步版本号文件 → 打 tag 并推送 → GitHub Actions 并行构建 CLI / GUI / Portable / Portable Slim 并发布 release（附 SHA256 校验清单）。
+`hls-downloader` 的发布流程：确定版本号 → 同步版本号文件 → 打 tag 并推送 → GitHub Actions 并行构建 CLI / Portable / Portable Slim 并发布 release（附 SHA256 校验清单）。
 
 发布产物（自动生成，无需手动打包）：
 
 | 产物 | 内容 |
 |------|------|
 | `hls-downloader-cli.zip` | CLI 独立包（内置 ffmpeg + ffprobe） |
-| `hls-downloader-gui.zip` | GUI 独立包（内置 ffmpeg + ffprobe） |
 | `hls-downloader-portable.zip` | CLI + GUI 共享运行时组合包（内置 ffmpeg + ffprobe） |
 | `hls-downloader-portable-slim.zip` | 同上的精简版（不内置 ffmpeg，运行时用 PATH / `FFMPEG_LOCATION`） |
-| `SHA256SUMS.txt` | 以上四个 zip 的 SHA256 清单（`<hash>  <文件名>`） |
+| `SHA256SUMS.txt` | 以上三个 zip 的 SHA256 清单（`<hash>  <文件名>`） |
+
+> 自 v1.12.1 起不再单独发行 `hls-downloader-gui.zip`：`hls-downloader-portable.zip` 已完整包含 GUI + CLI + ffmpeg，独立 GUI 包与它重复 98.8 MB。需要单独 GUI 构建的用户仍可本地用 `build_gui.spec`（见 `BUILDING.md`），CI 不再产出。
 
 ---
 
@@ -60,18 +61,17 @@ git push origin main --tags
 
 推送 tag 后 GitHub Actions（`.github/workflows/release.yml`）按以下依赖关系执行：
 
-1. **test**：安装 `requirements-build.txt` 锁定依赖 → 跑 `pytest -q`；
-2. **prepare-ffmpeg**（依赖 test）：下载固定版本 FFmpeg（gyan.dev essentials，**先校验 SHA256**）→ 解压成 `ffmpeg-*/bin/` 结构 → 作为短期 artifact `verified-ffmpeg` 上传（保留 1 天）；
-3. 四个构建 job **并行**（各自独立 `windows-latest` runner 与独立 `--workpath`）：
-   - **build-cli** / **build-gui** / **build-portable-full**：复用 `verified-ffmpeg`，`HLS_BUNDLE_FFMPEG=1`，跑 CLI `--help` 与 GUI 启动冒烟；
-   - **build-portable-slim**：只依赖 test，不下载 FFmpeg，`HLS_BUNDLE_FFMPEG=0`，构建后断言产物里不含 `_internal/ffmpeg`；
+1. **test** 与 **prepare-ffmpeg** 并行（两者互不依赖）：`test` 安装 `requirements-build.txt` 锁定依赖 → 跑 `pytest -q`；`prepare-ffmpeg` 下载固定版本 FFmpeg（gyan.dev essentials，**先校验 SHA256**）→ 解压成 `ffmpeg-*/bin/` 结构 → 作为短期 artifact `verified-ffmpeg` 上传（保留 1 天）；
+2. 三个构建 job **并行**（各自独立 `windows-latest` runner 与独立 `--workpath`），三者都依赖 `test`，含 ffmpeg 的两个还依赖 `prepare-ffmpeg`：
+   - **build-cli** / **build-portable-full**：复用 `verified-ffmpeg`，`HLS_BUNDLE_FFMPEG=1`，跑 CLI `--help` 与 GUI 启动冒烟；
+   - **build-portable-slim**：只依赖 `test`，不下载 FFmpeg，`HLS_BUNDLE_FFMPEG=0`，构建后断言产物里不含 `_internal/ffmpeg`；
    - 各自 `Compress-Archive` 压 zip，上传 artifact `release-*`；
-4. **release**（仅 tag 触发，依赖四个构建 job）：合并 artifact → 校验恰好 4 个 zip 且解压非空 → 生成 `SHA256SUMS.txt` → `softprops/action-gh-release` 用 tag 名创建 release（附四个 zip + 校验清单，自动生成 release notes）。
+3. **release**（仅 tag 触发，依赖三个构建 job）：合并 artifact → 校验恰好 3 个 zip 且解压非空 → 生成 `SHA256SUMS.txt` → `softprops/action-gh-release` 用 tag 名创建 release（附三个 zip + 校验清单，自动生成 release notes）。
 
 ## 5. 验证
 
-- 打开仓库 **Actions** 页，确认 `test` / `prepare-ffmpeg` / 四个 build job / `release` 全绿（无 Node 20 弃用 warning）。
-- 打开 **Releases** 页，确认新 tag 对应 release 已出现，附 4 个 zip + `SHA256SUMS.txt`。
+- 打开仓库 **Actions** 页，确认 `test` / `prepare-ffmpeg` / 三个 build job / `release` 全绿（无 Node 20 弃用 warning）。
+- 打开 **Releases** 页，确认新 tag 对应 release 已出现，附 3 个 zip + `SHA256SUMS.txt`。
 - 下载 `hls-downloader-portable.zip`，解压后双击 `hls_download_gui.exe`：图标正常、启动秒开、进度条走动；同目录 `hls_download.exe --help` 正常。
 - 下载 `hls-downloader-portable-slim.zip`，在装好 ffmpeg（PATH 或 `FFMPEG_LOCATION`）的机器上跑一次 `hls_download.exe <m3u8地址>`，确认能下载；在没装 ffmpeg 的机器上确认报错文案提示三种解决办法。
 - 抽查校验清单：

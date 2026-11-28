@@ -97,7 +97,7 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 | spec | 产物 | 说明 |
 |------|------|------|
 | `build_cli.spec` | `dist\hls_download\` | CLI 独立包（控制台窗口，双击无参数进交互式引导） |
-| `build_gui.spec` | `dist\hls_download_gui\` | GUI 独立包（无控制台） |
+| `build_gui.spec` | `dist\hls_download_gui\` | GUI 独立包（无控制台）；CI 不再发行，仅本地构建用 |
 | `build_portable.spec` | `dist\hls_downloader_portable\` | CLI + GUI **共享同一个 `_internal\` 运行时**的组合包 |
 
 内置还是外置 ffmpeg 由环境变量 `HLS_BUNDLE_FFMPEG` 决定（默认 `1` 内置）：
@@ -121,7 +121,7 @@ pyinstaller --noconfirm --workpath build/pyi-portable-slim --distpath dist/slim 
 
 产物（**只认 `--distpath` 下的，别点 `build\` 里的**）：
 - `dist\hls_download\hls_download.exe` — CLI 独立版
-- `dist\hls_download_gui\hls_download_gui.exe` — GUI 独立版
+- `dist\hls_download_gui\hls_download_gui.exe` — GUI 独立版（仅本地构建保留；CI 不再单独发行，见下节）
 - `dist\hls_downloader_portable\hls_download.exe` + `hls_download_gui.exe` — 共享运行时组合版（两个 exe 共用一份 `_internal\`）
 
 > ⚠️ 运行产物目录里的 exe。打包时 GUI 窗口还开着（或上一个 exe 进程未退出）会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
@@ -178,11 +178,12 @@ hls-downloader/
 
 GitHub Releases 提供以下发行物：
 
-- `hls-downloader-portable.zip`：CLI + GUI，共享 onedir 运行时，内置 FFmpeg/FFprobe。
+- `hls-downloader-portable.zip`：CLI + GUI，共享 onedir 运行时，内置 FFmpeg/FFprobe（同时覆盖独立 GUI 包的用途）。
 - `hls-downloader-portable-slim.zip`：CLI + GUI，共享运行时，不内置 FFmpeg；需要系统 PATH 中同时可用 `ffmpeg` 和 `ffprobe`，或设置 `FFMPEG_LOCATION`。
-- `hls-downloader-cli.zip`：内置 FFmpeg 的 CLI 独立包。
-- `hls-downloader-gui.zip`：内置 FFmpeg 的 GUI 独立包。
-- `SHA256SUMS.txt`：所有 ZIP 的 SHA256 校验值。
+- `hls-downloader-cli.zip`：内置 FFmpeg 的 CLI 独立包（适合脚本/自动化）。
+- `SHA256SUMS.txt`：以上三个 ZIP 的 SHA256 校验值。
+
+> v1.12.1 起停止单独发行 `hls-downloader-gui.zip`：`portable.zip` 已包含 GUI + CLI + ffmpeg，独立 GUI 包属于重复资产（98.8 MB）。需要单 exe GUI 的可以本地用 `build_gui.spec` 构建。
 
 便携版解压后可直接运行。精简版适合已经安装 FFmpeg 的用户；若检测不到 FFmpeg/FFprobe，程序会提示安装或设置 `FFMPEG_LOCATION`。
 
