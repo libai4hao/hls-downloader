@@ -28,7 +28,7 @@ jobs:
 
   prepare-ffmpeg:
     name: Prepare verified FFmpeg
-    needs: test
+    # 与 test 并行：FFmpeg 准备不依赖测试结果，串在 test 之后会白白多等一整个测试时长
     runs-on: windows-latest
     steps:
       - name: Download and verify FFmpeg
@@ -86,43 +86,6 @@ jobs:
         with:
           name: release-cli
           path: hls-downloader-cli.zip
-          if-no-files-found: error
-
-  build-gui:
-    name: Build GUI (内置 ffmpeg)
-    needs: [test, prepare-ffmpeg]
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: requirements-build.txt
-      - name: Install locked build dependencies
-        run: python -m pip install -r requirements-build.txt
-      - uses: actions/download-artifact@v7
-        with:
-          name: verified-ffmpeg
-          path: .
-      - name: Build GUI
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $env:HLS_BUNDLE_FFMPEG = "1"
-          pyinstaller --noconfirm --workpath build/pyi-gui --distpath dist build_gui.spec
-          $p = Start-Process -FilePath (Resolve-Path 'dist/hls_download_gui/hls_download_gui.exe') -PassThru
-          Start-Sleep -Seconds 5
-          if ($p.HasExited -and $p.ExitCode -ne 0) { throw "GUI startup smoke test failed: $($p.ExitCode)" }
-          if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
-          Copy-Item README.md, config.example.json dist/hls_download_gui/
-          Compress-Archive -Path dist/hls_download_gui -DestinationPath hls-downloader-gui.zip -CompressionLevel Optimal
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-gui
-          path: hls-downloader-gui.zip
           if-no-files-found: error
 
   build-portable-full:
@@ -201,7 +164,7 @@ jobs:
   release:
     name: Release (tag only)
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    needs: [build-cli, build-gui, build-portable-full, build-portable-slim]
+    needs: [build-cli, build-portable-full, build-portable-slim]
     runs-on: windows-latest
     permissions:
       contents: write
@@ -216,7 +179,7 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $files = Get-ChildItem release-assets -File -Filter '*.zip' | Sort-Object Name
-          if ($files.Count -ne 4) { throw "Expected 4 release ZIP files, found $($files.Count)" }
+          if ($files.Count -ne 3) { throw "Expected 3 release ZIP files, found $($files.Count)" }
           $verifyRoot = Join-Path $env:RUNNER_TEMP 'release-verify'
           New-Item -ItemType Directory -Force -Path $verifyRoot | Out-Null
           foreach ($file in $files) {
