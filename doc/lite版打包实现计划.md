@@ -1,5 +1,7 @@
 # lite 版（使用环境 ffmpeg）发布打包 实现计划
 
+> **状态：历史归档（已被取代）。** v1.12.0 起改用 `HLS_BUNDLE_FFMPEG` 开关 + `build_portable.spec` 的 Portable / Portable Slim 方案，`build_cli_lite.spec` / `build_gui_lite.spec` 已删除。本文仅保留当时的方案与决策记录，现行做法见 [../BUILDING.md](../BUILDING.md)、[发布SOP.md](发布SOP.md)、[迭代计划.md](迭代计划.md) V1.12 小节。文中 `lite` 命名、`_lite` 后缀与 4 个 zip 的产物清单均已过时。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 新增不含 ffmpeg 的 lite 发布包（CLI+GUI 各一），运行时自动回退探测系统 PATH 里的 ffmpeg；CI 一次发布产出 4 个 zip。

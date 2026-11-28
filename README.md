@@ -92,32 +92,47 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 
 ## 打包（可选）
 
-用 PyInstaller 打成**文件夹（onedir）**，双击里面的 exe 即可用（无需装 Python / yt-dlp / ffmpeg，全部打进去）。另有 **lite 版**（`*_lite.spec`）：不内置 ffmpeg、体积小，运行时自动探测系统 PATH 或 `FFMPEG_LOCATION`：
+用 PyInstaller 打成**文件夹（onedir）**，双击里面的 exe 即可用（无需装 Python / yt-dlp / ffmpeg）。构建依赖锁定在 `requirements-build.txt`，三个 spec 的作用：
 
-```bat
-:: 在 .venv_build 虚拟环境里装 pyinstaller 后执行
-.venv_build\Scripts\pyinstaller --clean --noconfirm build_cli.spec
-.venv_build\Scripts\pyinstaller --clean --noconfirm build_gui.spec
-:: lite 版（不内置 ffmpeg，运行时用 PATH / FFMPEG_LOCATION 定位）
-.venv_build\Scripts\pyinstaller --clean --noconfirm build_cli_lite.spec
-.venv_build\Scripts\pyinstaller --clean --noconfirm build_gui_lite.spec
+| spec | 产物 | 说明 |
+|------|------|------|
+| `build_cli.spec` | `dist\hls_download\` | CLI 独立包（控制台窗口，双击无参数进交互式引导） |
+| `build_gui.spec` | `dist\hls_download_gui\` | GUI 独立包（无控制台） |
+| `build_portable.spec` | `dist\hls_downloader_portable\` | CLI + GUI **共享同一个 `_internal\` 运行时**的组合包 |
+
+内置还是外置 ffmpeg 由环境变量 `HLS_BUNDLE_FFMPEG` 决定（默认 `1` 内置）：
+
+```powershell
+python -m pip install -r requirements-build.txt
+python -m pytest -q
+
+# 完整版：ffmpeg + ffprobe 随包
+$env:HLS_BUNDLE_FFMPEG = "1"
+pyinstaller --noconfirm --workpath build/pyi-cli --distpath dist build_cli.spec
+pyinstaller --noconfirm --workpath build/pyi-gui --distpath dist build_gui.spec
+pyinstaller --noconfirm --workpath build/pyi-portable --distpath dist build_portable.spec
+
+# 精简版（Slim）：不内置 ffmpeg，运行机器需从 PATH 找到 ffmpeg 与 ffprobe，或用 FFMPEG_LOCATION 指定
+$env:HLS_BUNDLE_FFMPEG = "0"
+pyinstaller --noconfirm --workpath build/pyi-portable-slim --distpath dist/slim build_portable.spec
 ```
 
-> ℹ️ **yt-dlp 版本来源**：本地打包（上面的 spec）会打包你环境里已安装的 yt-dlp——可以是系统装的，也可以是脚本同目录/上级的 `ytdlp_lib/`（nightly 构建，如 `2026.09.27.232945`）；而 **GitHub Actions 自动发布**（打 tag `v*` 触发）固定从 PyPI 安装稳定版（`yt-dlp==2026.11.23`），两者可能不是同一个构建。这是刻意取舍：CI 用可复现的稳定版，本地可用较新的 nightly。
+> ℹ️ **yt-dlp 版本来源**：本地构建打包你环境里已安装的 yt-dlp——可以是系统装的，也可以是脚本同目录/上级的 `ytdlp_lib/`（nightly 构建，如 `2026.09.27.232945`）；**GitHub Actions 自动发布**（打 tag `v*` 触发）固定安装 `requirements-build.txt` 里的稳定版（`yt-dlp==2026.11.23`）。这是刻意取舍：CI 用可复现的稳定版，本地可用较新的 nightly。
 
-产物（**只认 `dist\` 下的，别点 `build\` 里的**）：
-- `dist\hls_download\hls_download.exe` — CLI 版（控制台窗口，双击无参数时进入交互式引导）
-- `dist\hls_download_gui\hls_download_gui.exe` — GUI 版（无控制台）
-- `dist\hls_download_lite\hls_download.exe` — CLI lite 版（不内置 ffmpeg，需 PATH / `FFMPEG_LOCATION`）
-- `dist\hls_download_gui_lite\hls_download_gui.exe` — GUI lite 版（同上）
+产物（**只认 `--distpath` 下的，别点 `build\` 里的**）：
+- `dist\hls_download\hls_download.exe` — CLI 独立版
+- `dist\hls_download_gui\hls_download_gui.exe` — GUI 独立版
+- `dist\hls_downloader_portable\hls_download.exe` + `hls_download_gui.exe` — 共享运行时组合版（两个 exe 共用一份 `_internal\`）
 
-> ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
+> ⚠️ 运行产物目录里的 exe。打包时 GUI 窗口还开着（或上一个 exe 进程未退出）会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
-> ⚠️ **重新打包会先清空 `dist\` 下的同名产物目录**（如 `dist\hls_download\`）再输出，防止新旧构建叠加。数据文件（`config.json` / `download_history.log` / 输出目录）默认落在 exe 旁，也就是这个目录里——**别把数据存在 `dist\` 的包内**，重打包会静默删掉；要迁移就把数据文件复制到新包旁。
+> ⚠️ **重新打包会先清空目标产物目录**（如 `dist\hls_download\`）再输出，防止新旧构建叠加出嵌套镜像。数据文件（`config.json` / `download_history.log` / 输出目录）默认落在 exe 旁，也就是这个目录里——**别把数据存在产物目录内**，重打包会静默删掉；要迁移就把数据文件复制到新包旁。
 >
-> **为什么改成文件夹分发（onedir）而不是单个 exe？** 单文件 exe 每次启动都要先把几百 MB 的 Python + yt-dlp + ffmpeg 解压到系统临时目录，首次启动要等十几秒甚至更久。文件夹分发的 exe 直接读取旁边的 `_internal\`，**启动秒开**。代价是产物是一整个文件夹，不是单个文件。
+> 构建中间目录由 `--workpath` 指定（如 `build/pyi-cli`），spec 不再自动删除 `build\`，需要清理时自行删除、或交给 CI 的 runner 生命周期回收。
 >
-> **怎么发给别人？** 把整个 `dist\hls_download_gui\`（或 `dist\hls_download\`）文件夹压成一个 zip 发出去；对方解压后双击里面的 `hls_download_gui.exe` 即可。数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁（即 `_internal\` 同级目录）。
+> **为什么用文件夹分发（onedir）而不是单个 exe？** 单文件 exe 每次启动都要先把几百 MB 的 Python + yt-dlp + ffmpeg 解压到系统临时目录，首次启动要等十几秒甚至更久。文件夹分发的 exe 直接读取旁边的 `_internal\`，**启动秒开**。代价是产物是一整个文件夹，不是单个文件。
+>
+> **怎么发给别人？** 把整个产物文件夹（如 `dist\hls_downloader_portable\`）压成一个 zip 发出去；对方解压后双击里面的 exe 即可。数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁（即 `_internal\` 同级目录）。
 
 ## 首次运行被 Windows 拦截怎么办（SmartScreen）
 
@@ -136,10 +151,12 @@ hls-downloader/
 ├── config.example.json  # 配置示例（复制为 config.json 生效）
 ├── app.ico              # 程序图标（打包时写入 exe）
 ├── version_info.txt     # exe 版本信息（公司名/产品名/版本号）
-├── build_cli.spec       # PyInstaller 打包 CLI（onedir 文件夹）
-├── build_gui.spec       # PyInstaller 打包 GUI（onedir 文件夹）
-├── build_cli_lite.spec  # PyInstaller 打包 CLI lite（不内置 ffmpeg）
-├── build_gui_lite.spec  # PyInstaller 打包 GUI lite（不内置 ffmpeg）
+├── build_cli.spec       # PyInstaller 打包 CLI 独立包（onedir）
+├── build_gui.spec       # PyInstaller 打包 GUI 独立包（onedir）
+├── build_portable.spec  # PyInstaller 打包 CLI + GUI 共享运行时组合包
+├── requirements-build.txt # 锁定的构建依赖（PyInstaller / yt-dlp / pytest）
+├── BUILDING.md          # 本地构建与 CI 发布说明
+├── SECOND_PASS_REVIEW.md # 第二轮审查与实施记录
 ├── doc/                 # 文档目录
 │   ├── 发布SOP.md        # 发布流程（版本号 → 打 tag → 自动构建发布）
 │   ├── 功能设计.md       # 功能设计文档（设计决策 / 模块划分 / 数据流）
@@ -156,6 +173,20 @@ hls-downloader/
 │   └── refill.py
 └── README.md
 ```
+
+## Windows 发布包
+
+GitHub Releases 提供以下发行物：
+
+- `hls-downloader-portable.zip`：CLI + GUI，共享 onedir 运行时，内置 FFmpeg/FFprobe。
+- `hls-downloader-portable-slim.zip`：CLI + GUI，共享运行时，不内置 FFmpeg；需要系统 PATH 中同时可用 `ffmpeg` 和 `ffprobe`，或设置 `FFMPEG_LOCATION`。
+- `hls-downloader-cli.zip`：内置 FFmpeg 的 CLI 独立包。
+- `hls-downloader-gui.zip`：内置 FFmpeg 的 GUI 独立包。
+- `SHA256SUMS.txt`：所有 ZIP 的 SHA256 校验值。
+
+便携版解压后可直接运行。精简版适合已经安装 FFmpeg 的用户；若检测不到 FFmpeg/FFprobe，程序会提示安装或设置 `FFMPEG_LOCATION`。
+
+构建和打包细节见 [BUILDING.md](BUILDING.md)。
 
 ## 常见问题
 
