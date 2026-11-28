@@ -182,34 +182,34 @@ git commit -m "docs: 同步 lite 版打包与 ffmpeg PATH 探测说明"
 **Files:**
 - Modify: `build_cli.spec`、`build_gui.spec`、`build_cli_lite.spec`、`build_gui_lite.spec`（清理插在 `ROOT = Path.cwd()` 之后、Analysis 之前——**不能放脚本末尾**，末尾删会把刚打好的包删掉；rmtree 目标 `ROOT/"dist"/<本 spec COLLECT 名>`，`ignore_errors=True`）
 
-- [ ] **Step 1: 四个 spec 各加**（ROOT 定义后）：
+- [x] **Step 1: 四个 spec 各加**（ROOT 定义后）：
 
 ```python
 # 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
 shutil.rmtree(ROOT / "dist" / <COLLECT名>, ignore_errors=True)
 ```
 
-- [ ] **Step 2: Commit** `git commit -m "fix: 打包前清理 dist 同名旧产物，防止新旧构建叠加嵌套"`
+- [x] **Step 2: Commit** `git commit -m "fix: 打包前清理 dist 同名旧产物，防止新旧构建叠加嵌套"`（2d34ddb）
 
 ### Task 7: 重建 4 包并验证无嵌套
 
-- [ ] **Step 1: 重建 4 包**（命令按 README 打包节，venv 环境；完整版需本地 ffmpeg 目录存在）
-- [ ] **Step 2: 验证**：① 4 个 dist 目录均无 `_internal\_internal\` 嵌套；② hls_download_gui 体积回到 ~480MB 级；③ 连续构建两次同 spec，体积/文件数不翻倍；④ lite 包仍无 ffmpeg*.exe；⑤ `python -m pytest -q -p no:cacheprovider` 全绿
-- [ ] **Step 3: 台账 log 验证数据**
+- [x] **Step 1: 重建 4 包**（教训：PyInstaller CLI 一次只接受一个 specfile，多参数静默只处理第一个——必须逐条调用；本机无 ffmpeg 目录，临时复制 `D:\dev\ffmpeg` 的 ffmpeg/ffprobe 到上级 `ffmpeg-rebuild\bin\` 供完整版 glob 命中）
+- [x] **Step 2: 验证**：① 4 包均无 `_internal\_internal` 嵌套 ✓；② hls_download_gui 948.5→481.3 MB（-467MB）、4101→2066 files ✓；③ 重打 CLI lite 二次验证：1136 files/36.1 MB/无嵌套，与首打一致不翻倍 ✓；④ lite 包无 ffmpeg*.exe、完整版含 ffmpeg.exe+ffprobe.exe ✓；⑤ pytest 34 passed, 1 skipped ✓
+- [x] **Step 3: 台账 log 验证数据**
 
 ### Task 8: CI 拆并行 job + release 汇总
 
 **Files:**
 - Modify: `.github/workflows/release.yml`（单 job 拆为 build-full / build-lite 两个并行 job + release 汇总 job）
 
-- [ ] **Step 1: build-full job**：原 checkout/setup/pytest/ffmpeg 下载 + 两个完整版 spec + 2 个 Compress-Archive + upload-artifact（name=hls-downloader-full，2 zip）
-- [ ] **Step 2: build-lite job**：checkout/setup/pytest + 两个 lite spec（免 ffmpeg 下载）+ 2 个 Compress-Archive + upload-artifact（name=hls-downloader-lite，2 zip）
-- [ ] **Step 3: release job**：needs 两 build job，download-artifact 合并 4 zip，softprops/action-gh-release@v3 附 4 zip（仅 tag 触发）
-- [ ] **Step 4: PyYAML 校验** + 核对 lite job 不依赖 ffmpeg 步骤
-- [ ] **Step 5: Commit** `git commit -m "ci: 发布拆 full/lite 并行构建，release 汇总 4 zip"`
+- [x] **Step 1: build-full job**：原 checkout/setup/pytest/ffmpeg 下载 + 两个完整版 spec + 2 个 Compress-Archive + upload-artifact（name=hls-downloader-full，2 zip）
+- [x] **Step 2: build-lite job**：checkout/setup/pytest + 两个 lite spec（免 ffmpeg 下载）+ 2 个 Compress-Archive + upload-artifact（name=hls-downloader-lite，2 zip）
+- [x] **Step 3: release job**：needs 两 build job，download-artifact 合并 4 zip，softprops/action-gh-release@v3 附 4 zip（仅 tag 触发；job 级 if，非 step 级）
+- [x] **Step 4: PyYAML 校验**（jobs: build-full 9 步 / build-lite 8 步 / release 3 步 needs=[build-full,build-lite] if=tag）+ 核对 lite job 不依赖 ffmpeg 步骤
+- [x] **Step 5: Commit** aaa61a6 `ci: 发布拆 full/lite 并行构建，release 汇总 4 zip`
 
 ### Task 9: 文档同步 + 增量审查 + 收尾
 
-- [ ] **Step 1: README 打包节 / doc/发布SOP.md** 补防复发清理说明与并行 CI 描述（如有行为差异）
-- [ ] **Step 2: 增量审查**（仅 Task 6-8 改动，派 fresh subagent）
+- [x] **Step 1: doc/发布SOP.md** §4 改写为并行 job 描述（build-full/build-lite/release），§5 补 lite 冒烟验证行（d32dd98）；README 无需改（未涉及 job 结构）
+- [x] **Step 2: 增量审查**（reviewer2：可合并无 Critical；Important#1 dist 清空警示已补 71a4907；Minor 3 条记台账：build job permissions 收敛 / timeout+concurrency / release job 可用 ubuntu-latest）
 - [ ] **Step 3: 台账 close（需用户明确说「结束掉」）**
