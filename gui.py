@@ -265,7 +265,7 @@ class App:
             h._setup_ytdlp()
             ffmpeg_dir = h._find_ffmpeg_dir()
             if not ffmpeg_dir:
-                fail("错误：找不到 ffmpeg。请安装 ffmpeg 或设置环境变量 FFMPEG_LOCATION。")
+                fail("错误：找不到 ffmpeg。请安装 ffmpeg 并加入 PATH，或设置环境变量 FFMPEG_LOCATION 指向其 bin 目录；或改用完整版（内置 ffmpeg）。")
                 return
 
             ydl_opts = {

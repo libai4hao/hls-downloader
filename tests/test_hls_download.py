@@ -577,3 +577,33 @@ def test_gui_close_forces_exit_after_timeout(monkeypatch):
     app.root = FakeRoot()
     app._poll_queue()
     assert app.root.destroyed is True
+
+
+# --- _find_ffmpeg_dir：PATH 回退（lite 版不带 ffmpeg 打包） ---
+
+def test_find_ffmpeg_dir_falls_back_to_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("FFMPEG_LOCATION", raising=False)
+    monkeypatch.setattr(h, "RESOURCE_DIR", str(tmp_path))
+    monkeypatch.setattr(h, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(h, "ROOT", str(tmp_path))
+    monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe"))
+    assert h._find_ffmpeg_dir() == str(tmp_path)
+
+
+def test_find_ffmpeg_dir_prefers_bundled_over_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("FFMPEG_LOCATION", raising=False)
+    bundled = tmp_path / "ffmpeg-9.0" / "bin"
+    bundled.mkdir(parents=True)
+    monkeypatch.setattr(h, "RESOURCE_DIR", str(tmp_path))
+    monkeypatch.setattr(h, "DATA_DIR", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(h, "ROOT", str(tmp_path / "elsewhere"))
+    monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe"))
+    assert h._find_ffmpeg_dir() == str(bundled)
+
+
+def test_find_ffmpeg_dir_env_location_still_wins(tmp_path, monkeypatch):
+    env_dir = tmp_path / "envbin"
+    env_dir.mkdir()
+    monkeypatch.setenv("FFMPEG_LOCATION", str(env_dir))
+    monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe"))
+    assert h._find_ffmpeg_dir() == str(env_dir)

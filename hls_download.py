@@ -80,6 +80,10 @@ def _find_ffmpeg_dir():
         hits = sorted(glob.glob(os.path.join(base, "ffmpeg*", "bin")))
         if hits:
             return hits[0]
+    # lite 版（不带 ffmpeg 打包）：回退到系统 PATH 里的 ffmpeg
+    which = shutil.which("ffmpeg")
+    if which:
+        return os.path.dirname(which)
     return None
 
 
@@ -597,7 +601,7 @@ def main():
 
     ffmpeg_dir = _find_ffmpeg_dir()
     if not ffmpeg_dir:
-        sys.exit("错误：找不到 ffmpeg。请安装 ffmpeg 或设置环境变量 FFMPEG_LOCATION。")
+        sys.exit("错误：找不到 ffmpeg。请安装 ffmpeg 并加入 PATH，或设置环境变量 FFMPEG_LOCATION 指向其 bin 目录；或改用完整版（内置 ffmpeg）。")
 
     # 命令行参数 > config.json > 内置默认值
     cookies = args.cookies or config.get("cookies")
