@@ -1,7 +1,7 @@
 {
   "identity": {"uuid": "cb8097e5-3623-4ac5-9dc9-9ad9ae13e580"},
   "tasks": {
-    "20261128-1531-881f-添加使用环境ffmpeg版发布打包": {"category": "功能新增", "created": "2026-11-28 15:31:52", "creator": "cb8097e5-3623-4ac5-9dc9-9ad9ae13e580", "creator_name": "link", "finished": null, "owner": "cb8097e5-3623-4ac5-9dc9-9ad9ae13e580", "owner_name": "link", "started": "2026-11-28 15:31:52", "status": "doing", "tags": ["打包", "ffmpeg", "发布流程", "CI"], "title": "添加使用环境ffmpeg版发布打包", "updated": "2026-11-28 16:32:53", "worklog": "worklog/202611/28-1531-881f-添加使用环境ffmpeg版发布打包.md"}
+    "20261128-1531-881f-添加使用环境ffmpeg版发布打包": {"category": "功能新增", "created": "2026-11-28 15:31:52", "creator": "cb8097e5-3623-4ac5-9dc9-9ad9ae13e580", "creator_name": "link", "finished": null, "owner": "cb8097e5-3623-4ac5-9dc9-9ad9ae13e580", "owner_name": "link", "started": "2026-11-28 15:31:52", "status": "doing", "tags": ["打包", "ffmpeg", "发布流程", "CI"], "title": "添加使用环境ffmpeg版发布打包", "updated": "2026-11-28 16:39:57", "worklog": "worklog/202611/28-1531-881f-添加使用环境ffmpeg版发布打包.md"}
   },
   "version": "20261022000000"
 }
