@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Windows (cli + gui)
+    name: Build Windows (cli + gui + lite)
     runs-on: windows-latest
     permissions:
       contents: write
@@ -54,12 +54,20 @@ jobs:
       - name: Build GUI
         run: pyinstaller --clean --noconfirm build_gui.spec
 
+      - name: Build CLI lite
+        run: pyinstaller --clean --noconfirm build_cli_lite.spec
+
+      - name: Build GUI lite
+        run: pyinstaller --clean --noconfirm build_gui_lite.spec
+
       - name: Package zips
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           Compress-Archive -Path "dist\hls_download\*" -DestinationPath "hls_download.zip" -CompressionLevel Optimal
           Compress-Archive -Path "dist\hls_download_gui\*" -DestinationPath "hls_download_gui.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "dist\hls_download_lite\*" -DestinationPath "hls_download_lite.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "dist\hls_download_gui_lite\*" -DestinationPath "hls_download_gui_lite.zip" -CompressionLevel Optimal
           Get-ChildItem *.zip | ForEach-Object { Write-Host "$($_.Name)  $([math]::Round($_.Length/1MB, 1)) MB" }
 
       - name: Upload artifacts
@@ -69,6 +77,8 @@ jobs:
           path: |
             hls_download.zip
             hls_download_gui.zip
+            hls_download_lite.zip
+            hls_download_gui_lite.zip
           if-no-files-found: error
 
       - name: Create release (tag only)
@@ -78,4 +88,6 @@ jobs:
           files: |
             hls_download.zip
             hls_download_gui.zip
+            hls_download_lite.zip
+            hls_download_gui_lite.zip
           generate_release_notes: true
