@@ -113,6 +113,8 @@ python hls_download.py --batch urls.txt --ua "Mozilla/5.0 ..." --proxy "http://1
 
 > ⚠️ 运行 `dist\` 下的 exe。打包脚本会在完成后**自动清理 `build\` 中间产物目录**，只留 `dist\` 成品；若打包时 GUI 窗口还开着（或上一个 exe 进程未退出），会占用输出目录导致重新打包失败，请先关闭正在运行的下载器再打包。
 >
+> ⚠️ **重新打包会先清空 `dist\` 下的同名产物目录**（如 `dist\hls_download\`）再输出，防止新旧构建叠加。数据文件（`config.json` / `download_history.log` / 输出目录）默认落在 exe 旁，也就是这个目录里——**别把数据存在 `dist\` 的包内**，重打包会静默删掉；要迁移就把数据文件复制到新包旁。
+>
 > **为什么改成文件夹分发（onedir）而不是单个 exe？** 单文件 exe 每次启动都要先把几百 MB 的 Python + yt-dlp + ffmpeg 解压到系统临时目录，首次启动要等十几秒甚至更久。文件夹分发的 exe 直接读取旁边的 `_internal\`，**启动秒开**。代价是产物是一整个文件夹，不是单个文件。
 >
 > **怎么发给别人？** 把整个 `dist\hls_download_gui\`（或 `dist\hls_download\`）文件夹压成一个 zip 发出去；对方解压后双击里面的 `hls_download_gui.exe` 即可。数据文件（`config.json` / `download_history.log` / 输出目录）落在 exe 旁（即 `_internal\` 同级目录）。

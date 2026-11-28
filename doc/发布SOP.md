@@ -87,3 +87,6 @@ A：到 Actions 失败 job 看日志，多数是 ffmpeg 下载地址变动（gya
 
 **Q：Node 20 弃用 warning 是什么？**
 A：GitHub 2025-09 起弃用 Node 20，旧 action（checkout@v4 等）会提示。当前工作流已升级到 `checkout@v7` / `setup-python@v7` / `upload-artifact@v7` / `action-gh-release@v3`，均切 Node 24，不会再报。
+
+**Q：本地重新打包会不会丢数据？**
+A：spec 脚本会先清空 `dist\` 下的同名产物目录（防新旧构建叠加）再输出，而数据文件（`config.json` / `download_history.log` / 输出目录）默认落在 exe 旁、即该目录内——重打包前把数据复制出去，或平时就把数据存在包目录外（详见 README 打包节的 ⚠️ 说明）。
