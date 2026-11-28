@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path.cwd()
+
+# 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
+shutil.rmtree(ROOT / "dist" / "hls_download_lite", ignore_errors=True)
 # vendored yt-dlp：先把它塞进 sys.path，让 collect_all 能解析 yt_dlp
 YTDLP_LIB = ROOT / "ytdlp_lib"
 sys.path.insert(0, str(YTDLP_LIB))

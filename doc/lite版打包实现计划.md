@@ -167,6 +167,49 @@ git commit -m "docs: 同步 lite 版打包与 ffmpeg PATH 探测说明"
 
 ### Task 5: 终验
 
-- [ ] `python -m pytest -q` 全绿
-- [ ] 复跑 lite 冒烟（若 Task 2 之后代码未再动则沿用其结果）
-- [ ] 汇报改动清单；提醒用户触发 CI（Actions Run workflow 或推 tag）核对 4 zip
+- [x] `python -m pytest -q` 全绿（34 passed, 1 skipped，2026-11-28）
+- [x] 复跑 lite 冒烟（Task 2 后代码未再动，沿用其结果）
+- [x] 汇报改动清单；提醒用户触发 CI（Actions Run workflow 或推 tag）核对 4 zip
+
+---
+
+## 追加段：打包体积与 CI 速度优化（方案A，2026-11-29 获批）
+
+**背景:** dist 调查发现 GUI 完整版 948.5MB，根因是 PyInstaller 清 build/ 不清 dist 同名旧目录，新旧产物叠加出 `_internal\_internal\` 完整镜像嵌套（2050 files/469.8MB ×2）；完整 CLI dist 也是 11-10 旧产物。lite 两包（36.1/43.5MB）为新打干净产物。spec/CI 属配置类改动，pytest 不覆盖，验证方式为重建实测。
+
+### Task 6: 4 个 spec 开头加 dist 防复发清理
+
+**Files:**
+- Modify: `build_cli.spec`、`build_gui.spec`、`build_cli_lite.spec`、`build_gui_lite.spec`（清理插在 `ROOT = Path.cwd()` 之后、Analysis 之前——**不能放脚本末尾**，末尾删会把刚打好的包删掉；rmtree 目标 `ROOT/"dist"/<本 spec COLLECT 名>`，`ignore_errors=True`）
+
+- [ ] **Step 1: 四个 spec 各加**（ROOT 定义后）：
+
+```python
+# 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
+shutil.rmtree(ROOT / "dist" / <COLLECT名>, ignore_errors=True)
+```
+
+- [ ] **Step 2: Commit** `git commit -m "fix: 打包前清理 dist 同名旧产物，防止新旧构建叠加嵌套"`
+
+### Task 7: 重建 4 包并验证无嵌套
+
+- [ ] **Step 1: 重建 4 包**（命令按 README 打包节，venv 环境；完整版需本地 ffmpeg 目录存在）
+- [ ] **Step 2: 验证**：① 4 个 dist 目录均无 `_internal\_internal\` 嵌套；② hls_download_gui 体积回到 ~480MB 级；③ 连续构建两次同 spec，体积/文件数不翻倍；④ lite 包仍无 ffmpeg*.exe；⑤ `python -m pytest -q -p no:cacheprovider` 全绿
+- [ ] **Step 3: 台账 log 验证数据**
+
+### Task 8: CI 拆并行 job + release 汇总
+
+**Files:**
+- Modify: `.github/workflows/release.yml`（单 job 拆为 build-full / build-lite 两个并行 job + release 汇总 job）
+
+- [ ] **Step 1: build-full job**：原 checkout/setup/pytest/ffmpeg 下载 + 两个完整版 spec + 2 个 Compress-Archive + upload-artifact（name=hls-downloader-full，2 zip）
+- [ ] **Step 2: build-lite job**：checkout/setup/pytest + 两个 lite spec（免 ffmpeg 下载）+ 2 个 Compress-Archive + upload-artifact（name=hls-downloader-lite，2 zip）
+- [ ] **Step 3: release job**：needs 两 build job，download-artifact 合并 4 zip，softprops/action-gh-release@v3 附 4 zip（仅 tag 触发）
+- [ ] **Step 4: PyYAML 校验** + 核对 lite job 不依赖 ffmpeg 步骤
+- [ ] **Step 5: Commit** `git commit -m "ci: 发布拆 full/lite 并行构建，release 汇总 4 zip"`
+
+### Task 9: 文档同步 + 增量审查 + 收尾
+
+- [ ] **Step 1: README 打包节 / doc/发布SOP.md** 补防复发清理说明与并行 CI 描述（如有行为差异）
+- [ ] **Step 2: 增量审查**（仅 Task 6-8 改动，派 fresh subagent）
+- [ ] **Step 3: 台账 close（需用户明确说「结束掉」）**

@@ -4,6 +4,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path.cwd()
+
+# 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
+shutil.rmtree(ROOT / "dist" / "hls_download_gui", ignore_errors=True)
 YTDLP_LIB = ROOT / "ytdlp_lib"
 sys.path.insert(0, str(YTDLP_LIB))
 
