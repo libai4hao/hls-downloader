@@ -76,6 +76,17 @@ def test_convert_json_cookies_sanitizes_newline_in_value(tmp_path):
     assert "\n" not in lines[0] and "\t" not in lines[0].split("\t", 6)[-1]
 
 
+def test_convert_json_cookies_rejects_invalid_domain_and_sanitizes_path(tmp_path):
+    src = _cookie_file(tmp_path, [
+        {"domain": "example.com\tINJECT", "name": "bad", "value": "x"},
+        {"domain": "example.com", "path": "/safe\nINJECT", "name": "ok", "value": "y"},
+    ])
+    tmp = h._convert_json_cookies(src)
+    lines = _read_tmp_cookie(tmp).splitlines()
+    assert len(lines) == 3
+    assert lines[2].split("\t")[2] == "/"
+
+
 def test_convert_json_cookies_removes_temp_file_on_write_failure(tmp_path, monkeypatch):
     src = _cookie_file(tmp_path, [{
         "domain": "example.com", "name": "a", "value": "b",
@@ -556,14 +567,14 @@ def test_gui_removes_temp_cookie_when_initialization_fails(tmp_path, monkeypatch
     assert not temp_cookie.exists()
 
 
-def test_gui_close_forces_exit_after_timeout(monkeypatch):
+def test_gui_close_waits_for_worker_without_deleting_live_cookie(monkeypatch):
     gui = _load_gui()
     app = gui.App.__new__(gui.App)
     app.q = queue.Queue()
     app._closing = True
-    app._close_deadline = 0
     app._tmp_cookie = None
     app.worker = types.SimpleNamespace(is_alive=lambda: True)
+    scheduled = []
 
     class FakeRoot:
         destroyed = False
@@ -572,14 +583,15 @@ def test_gui_close_forces_exit_after_timeout(monkeypatch):
             self.destroyed = True
 
         def after(self, *args):
-            raise AssertionError("polling should stop after forced close")
+            scheduled.append(args)
 
     app.root = FakeRoot()
     app._poll_queue()
-    assert app.root.destroyed is True
+    assert app.root.destroyed is False
+    assert scheduled
 
 
-# --- _find_ffmpeg_dir：PATH 回退（lite 版不带 ffmpeg 打包） ---
+# --- _find_ffmpeg_dir：PATH 回退（Slim 版不带 ffmpeg 打包） ---
 
 def test_find_ffmpeg_dir_falls_back_to_path(tmp_path, monkeypatch):
     monkeypatch.delenv("FFMPEG_LOCATION", raising=False)
@@ -588,6 +600,15 @@ def test_find_ffmpeg_dir_falls_back_to_path(tmp_path, monkeypatch):
     monkeypatch.setattr(h, "ROOT", str(tmp_path))
     monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe"))
     assert h._find_ffmpeg_dir() == str(tmp_path)
+
+
+def test_find_ffmpeg_dir_requires_both_ffmpeg_and_ffprobe_on_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("FFMPEG_LOCATION", raising=False)
+    monkeypatch.setattr(h, "RESOURCE_DIR", str(tmp_path))
+    monkeypatch.setattr(h, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(h, "ROOT", str(tmp_path))
+    monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe") if name == "ffmpeg" else None)
+    assert h._find_ffmpeg_dir() is None
 
 
 def test_find_ffmpeg_dir_prefers_bundled_over_path(tmp_path, monkeypatch):
@@ -607,3 +628,25 @@ def test_find_ffmpeg_dir_env_location_still_wins(tmp_path, monkeypatch):
     monkeypatch.setenv("FFMPEG_LOCATION", str(env_dir))
     monkeypatch.setattr(h.shutil, "which", lambda name: str(tmp_path / "ffmpeg.exe"))
     assert h._find_ffmpeg_dir() == str(env_dir)
+# --- _sanitize_filename / _ensure_ext / _redact_sensitive_text：文件安全与日志脱敏 ---
+
+def test_sanitize_filename_blocks_windows_invalid_names_and_paths():
+    assert h._sanitize_filename(r"..\CON.txt") == "_CON.txt"
+    assert h._sanitize_filename("bad:name?.mp4") == "bad_name_.mp4"
+    assert h._sanitize_filename("trailing. ") == "trailing"
+    assert h._sanitize_filename("../../etc/passwd") == "passwd"
+
+
+def test_ensure_ext_sanitizes_user_supplied_name():
+    assert h._ensure_ext("folder/name") == "name.mp4"
+    assert h._ensure_ext("../a:b.mp4") == "a_b.mp4"
+
+
+def test_redact_sensitive_query_parameters_in_log_urls():
+    value = h._redact_sensitive_text(
+        "failed https://example.test/video?token=secret&quality=720&X-Amz-Signature=abc."
+    )
+    assert "secret" not in value and "abc" not in value
+    assert "quality=720" in value
+    assert "REDACTED" in value
+    assert value.endswith(".")

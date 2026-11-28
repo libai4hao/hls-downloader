@@ -5,7 +5,6 @@ import os
 import queue
 import re
 import threading
-import time
 
 import hls_download as h
 
@@ -16,7 +15,8 @@ except ImportError:
     raise SystemExit("错误：需要 tkinter（Python 标准库自带）。")
 
 
-CLOSE_TIMEOUT_SECONDS = 30
+MAX_LOG_LINES = 5000
+QUEUE_MAXSIZE = 5000
 
 
 def _configured_out_dir():
@@ -32,7 +32,15 @@ class _QueueLogHandler(logging.Handler):
         self.q = q
 
     def emit(self, record):
-        self.q.put(record.getMessage())
+        try:
+            self.q.put_nowait(h._redact_sensitive_text(record.getMessage()))
+        except queue.Full:
+            # 日志拥塞时丢弃最旧的普通日志，不能阻塞 yt-dlp 下载线程。
+            try:
+                self.q.get_nowait()
+                self.q.put_nowait(h._redact_sensitive_text(record.getMessage()))
+            except (queue.Empty, queue.Full):
+                pass
 
 
 def _build_logger(q):
@@ -47,12 +55,11 @@ class App:
     def __init__(self, root):
         self.root = root
         self.root.title("HLS 视频下载器")
-        self.q = queue.Queue()
+        self.q = queue.Queue(maxsize=QUEUE_MAXSIZE)
         self.stop_evt = threading.Event()
         self.worker = None
         self._progress_title = None
         self._closing = False
-        self._close_deadline = None
         self._tmp_cookie = None
 
         self._build_ui()
@@ -116,10 +123,25 @@ class App:
         if f:
             self.cookie_var.set(f)
 
+    def _queue_put(self, item, critical=False):
+        """跨线程投递 UI 消息；队列满时优先保留状态/错误等关键事件。"""
+        try:
+            self.q.put_nowait(item)
+            return
+        except queue.Full:
+            if not critical:
+                return
+        try:
+            self.q.get_nowait()
+            self.q.put_nowait(item)
+        except (queue.Empty, queue.Full):
+            pass
+
     def _poll_queue(self):
         """主线程统一消费队列：str=日志，__status__=状态栏，__progress__=进度，__error__=弹框。"""
         try:
-            while True:
+            # 每轮最多处理 300 条，避免高频日志长期占用 Tk 主线程。
+            for _ in range(300):
                 item = self.q.get_nowait()
                 if isinstance(item, tuple):
                     kind, payload = item
@@ -138,10 +160,6 @@ class App:
         if self._closing and self.worker:
             if not self.worker.is_alive():
                 # worker 已收尾（临时 cookie 等已清理），此时再销毁窗口
-                self.root.destroy()
-                return
-            if self._close_deadline is not None and time.monotonic() >= self._close_deadline:
-                self._cleanup_tmp_cookie()
                 self.root.destroy()
                 return
         self.root.after(100, self._poll_queue)
@@ -197,7 +215,11 @@ class App:
 
     def _append_log(self, msg):
         self.log_text.configure(state="normal")
-        self.log_text.insert("end", str(msg) + "\n")
+        self.log_text.insert("end", h._redact_sensitive_text(msg) + "\n")
+        # 限制 Text 控件历史，防止长时间批量下载导致 GUI 内存持续增长。
+        line_count = int(self.log_text.index("end-1c").split(".")[0])
+        if line_count > MAX_LOG_LINES:
+            self.log_text.delete("1.0", f"{line_count - MAX_LOG_LINES}.0")
         self.log_text.configure(state="disabled")
         self.log_text.see("end")
 
@@ -227,20 +249,19 @@ class App:
         self.stop_evt.clear()
         self.worker = threading.Thread(
             target=self._download, args=(lines, out_dir, name, cookies, proxy, is_batch),
-            daemon=True)
+            daemon=False)
         self.worker.start()
 
     def _stop(self):
         self.stop_evt.set()
-        self.q.put(("__status__", "已请求停止（当前片段结束后生效）…"))
+        self._queue_put(("__status__", "已请求停止（当前片段结束后生效）…"), critical=True)
 
     def _on_close(self):
         """关闭窗口：下载中先请求停止，等 worker 收尾并清理临时文件后再销毁窗口。"""
         if self.worker and self.worker.is_alive():
             self._closing = True
-            self._close_deadline = time.monotonic() + CLOSE_TIMEOUT_SECONDS
             self.stop_evt.set()
-            self.status_var.set("正在停止并清理，请稍候…")
+            self.status_var.set("正在停止并清理，请稍候…（下载线程结束后自动关闭）")
         else:
             self.root.destroy()
 
@@ -250,16 +271,16 @@ class App:
         前缀随进度 payload 一起传入，避免 worker 写主线程属性造成竞态。
         """
         if d.get("status") in ("downloading", "finished"):
-            self.q.put(("__progress__", {**d, "_prefix": prefix}))
+            self._queue_put(("__progress__", {**d, "_prefix": prefix}))
 
     def _download(self, lines, out_dir, name, cookies, proxy, is_batch):
         prefix = "下载中："
 
         def log(msg):
-            self.q.put(msg)
+            self._queue_put(msg)
 
         def fail(msg):
-            self.q.put(("__error__", msg))
+            self._queue_put(("__error__", msg), critical=True)
 
         try:
             h._setup_ytdlp()
@@ -320,33 +341,33 @@ class App:
                     m = re.match(r"\[(\d+)/(\d+)\] 开始下载", msg)
                     if m:
                         prefix = f"[{m.group(1)}/{total}] 正在下载："
-                        self.q.put(("__progress__", {"_reset": True}))
-                    self.q.put(msg)
+                        self._queue_put(("__progress__", {"_reset": True}))
+                    self._queue_put(msg)
 
-                self.q.put(("__status__", f"开始批量下载，共 {total} 条"))
+                self._queue_put(("__status__", f"开始批量下载，共 {total} 条"), critical=True)
                 ok, fail_count, failed_file = h._run_batch(
                     items, ydl_opts, out_dir, history_enabled, history_file,
                     False, retries, log=batch_log, stop_evt=self.stop_evt)
                 if self.stop_evt.is_set():
-                    self.q.put(("__status__", "已停止"))
+                    self._queue_put(("__status__", "已停止"), critical=True)
                 elif fail_count:
-                    self.q.put(("__status__", f"⚠️ 批量下载完成：成功 {ok}/{total}，失败 {fail_count}"))
+                    self._queue_put(("__status__", f"⚠️ 批量下载完成：成功 {ok}/{total}，失败 {fail_count}"), critical=True)
                 else:
-                    self.q.put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"))
+                    self._queue_put(("__status__", f"✅ 批量下载完成：成功 {ok}/{total}"), critical=True)
             else:
-                self.q.put(("__status__", "开始下载…"))
+                self._queue_put(("__status__", "开始下载…"), critical=True)
                 err = h._run_single(lines[0], name, ydl_opts, out_dir, history_enabled,
                                     history_file, False, retries, log=log,
                                     stop_evt=self.stop_evt)
                 if self.stop_evt.is_set():
-                    self.q.put(("__status__", "已停止"))
+                    self._queue_put(("__status__", "已停止"), critical=True)
                 elif err is not None:
                     log(f"下载失败：{err}")
-                    self.q.put(("__status__", "❌ 下载失败"))
+                    self._queue_put(("__status__", "❌ 下载失败"), critical=True)
                 else:
-                    self.q.put(("__status__", "✅ 下载成功"))
+                    self._queue_put(("__status__", "✅ 下载成功"), critical=True)
         except h.DownloadCancelled:
-            self.q.put(("__status__", "已停止"))
+            self._queue_put(("__status__", "已停止"), critical=True)
         except Exception as e:
             fail(f"异常：{e}")
         finally:

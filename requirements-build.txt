@@ -1,0 +1,4 @@
+# Windows release build toolchain; update deliberately and review release notes.
+pyinstaller==6.16.0
+yt-dlp==2026.11.23
+pytest==8.4.2

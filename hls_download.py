@@ -41,6 +41,7 @@ import shutil
 import sys
 import tempfile
 from datetime import datetime
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FROZEN = getattr(sys, "frozen", False)
@@ -80,10 +81,11 @@ def _find_ffmpeg_dir():
         hits = sorted(glob.glob(os.path.join(base, "ffmpeg*", "bin")))
         if hits:
             return hits[0]
-    # lite 版（不带 ffmpeg 打包）：回退到系统 PATH 里的 ffmpeg
-    which = shutil.which("ffmpeg")
-    if which:
-        return os.path.dirname(which)
+    # Slim 发行版不内置 FFmpeg：允许使用系统 PATH 中的 ffmpeg/ffprobe。
+    ffmpeg_exe = shutil.which("ffmpeg")
+    ffprobe_exe = shutil.which("ffprobe")
+    if ffmpeg_exe and ffprobe_exe:
+        return os.path.dirname(os.path.abspath(ffmpeg_exe))
     return None
 
 
@@ -123,13 +125,55 @@ def _resolve_path(value, default):
     """把配置/命令行里的路径统一成绝对路径；相对路径以脚本目录为基准。"""
     if not value:
         return default
-    # frozen(onefile) 下相对路径以 exe 所在目录(DATA_DIR)为基准；源码运行 DATA_DIR==HERE
+    # frozen(onedir 打包) 下相对路径以 exe 所在目录(DATA_DIR)为基准；源码运行 DATA_DIR==HERE
     return value if os.path.isabs(value) else os.path.join(DATA_DIR, value)
 
 
 def _strip_ansi(text):
     """去掉文本里的 ANSI 颜色控制码（如 [0;31m），避免写进下载历史。"""
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+
+def _redact_sensitive_text(text):
+    """脱敏日志文本中的 URL 凭据参数，避免签名链接/令牌进入 GUI 日志。"""
+    sensitive = {"token", "access_token", "refresh_token", "auth", "authorization",
+                 "signature", "sig", "key", "apikey", "api_key", "password", "passwd"}
+    url_pattern = re.compile(r"https?://[^\s<>\"']+")
+
+    def replace(match):
+        raw = match.group(0)
+        suffix = ""
+        while raw and raw[-1] in ".,;:!?)]}\u3002，；）》」』":
+            suffix = raw[-1] + suffix
+            raw = raw[:-1]
+        try:
+            parts = urlsplit(raw)
+            pairs = parse_qsl(parts.query, keep_blank_values=True)
+            if not pairs:
+                return raw + suffix
+            def is_sensitive(key):
+                normalized = key.lower().replace("-", "_")
+                return (normalized in sensitive or "token" in normalized or
+                        "signature" in normalized or "authorization" in normalized or
+                        "credential" in normalized)
+            query = urlencode([(k, "REDACTED" if is_sensitive(k) else v) for k, v in pairs])
+            return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment)) + suffix
+        except ValueError:
+            return "[URL REDACTED]" + suffix
+
+    return url_pattern.sub(replace, str(text))
+
+
+def _sanitize_filename(name):
+    """生成 Windows 安全文件名，去除路径穿越、非法字符及保留设备名。"""
+    value = str(name or "").strip().replace("\\", "/").rsplit("/", 1)[-1]
+    value = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).rstrip(" .")
+    if not value or value in {".", ".."}:
+        value = "video"
+    stem = value.split(".", 1)[0].upper()
+    if stem in {"CON", "PRN", "AUX", "NUL"} or re.fullmatch(r"(?:COM|LPT)[1-9]", stem):
+        value = "_" + value
+    return value
 
 
 def _raise_if_stopped(stop_evt):
@@ -177,13 +221,17 @@ def _convert_json_cookies(src):
     for c in cookies:
         if not isinstance(c, dict):
             continue
-        domain = c.get("domain", "")
-        if not domain:
+        # Netscape Cookie 文件是制表符分隔格式；拒绝控制字符和无效字段，
+        # 避免恶意/损坏 JSON 注入额外列或破坏文件结构。
+        domain = str(c.get("domain") or "").strip()
+        if not domain or any(ch.isspace() for ch in domain) or "/" in domain:
             continue
         host_only = bool(c.get("hostOnly", False))
         include = "FALSE" if host_only else "TRUE"
         d = domain if host_only else (domain if domain.startswith(".") else "." + domain)
-        path = c.get("path") or "/"
+        path = str(c.get("path") or "/")
+        if not path.startswith("/") or any(ch in path for ch in "\t\r\n"):
+            path = "/"
         secure = "TRUE" if c.get("secure") else "FALSE"
         exp = c.get("expirationDate")
         if c.get("session") or exp is None:
@@ -216,9 +264,9 @@ def _convert_json_cookies(src):
 
 def _ensure_ext(name):
     """把用户指定的文件名补全扩展名：已含常见音视频后缀则原样，否则补 .mp4。"""
-    name = (name or "").strip()
-    if not name:
+    if not name or not str(name).strip():
         return None
+    name = _sanitize_filename(name)
     if any(name.lower().endswith(e) for e in _VIDEO_EXTS):
         return name
     return name + ".mp4"
@@ -433,7 +481,7 @@ def _download_one(url, ydl_opts, out_dir, history_enabled, history_file, overwri
         opts = dict(ydl_opts)
         if want_name:
             # 只取文件名，防止 -o 里的绝对路径/上级目录逃出 staging
-            final_name = _ensure_ext(os.path.basename(want_name))
+            final_name = _ensure_ext(want_name)
             opts["outtmpl"] = os.path.join(staging_dir, final_name)
             # 用户指定了扩展名时，让 ffmpeg 转封装成对应容器
             ext = os.path.splitext(final_name)[1].lstrip(".")

@@ -1,39 +1,42 @@
-# build_cli.spec — hls_download 的 CLI 打包（onedir 文件夹分发，启动快、有图标）
+# build_cli.spec — CLI 独立 onedir 包
+# HLS_BUNDLE_FFMPEG=1（默认）内置 ffmpeg/ffprobe；=0 打精简变体，运行时靠 PATH / FFMPEG_LOCATION
+import os
 import shutil
 import sys
 from pathlib import Path
-
-ROOT = Path.cwd()
-
-# 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
-shutil.rmtree(ROOT / "dist" / "hls_download", ignore_errors=True)
-# vendored yt-dlp：先把它塞进 sys.path，让 collect_all 能解析 yt_dlp
-YTDLP_LIB = ROOT / "ytdlp_lib"
-sys.path.insert(0, str(YTDLP_LIB))
-
 from PyInstaller.utils.hooks import collect_all
 
-# ffmpeg.exe + ffprobe.exe：优先项目目录，否则上级目录（与 hls_download._find_ffmpeg_dir 的搜索一致）
-FFMPEG_BIN = next(ROOT.glob("ffmpeg*/bin/ffmpeg.exe"), None)
-FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
-if FFMPEG_BIN is None:
-    FFMPEG_BIN = next(ROOT.parent.glob("ffmpeg*/bin/ffmpeg.exe"), None)
-    FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
-if FFMPEG_BIN is None:
-    print("警告：未找到本地 ffmpeg，本次将打出不含 ffmpeg 的包（运行时需 PATH 或 FFMPEG_LOCATION）；如需内置请用完整版 spec 并准备好 ffmpeg 目录。")
-FFPROBE_BIN = FFMPEG_DIR / "ffprobe.exe" if FFMPEG_DIR and (FFMPEG_DIR / "ffprobe.exe").exists() else None
+ROOT = Path(SPECPATH).resolve()
+YTDLP_LIB = ROOT / "ytdlp_lib"
+if YTDLP_LIB.is_dir():
+    sys.path.insert(0, str(YTDLP_LIB))
 
-# 全量收集 yt-dlp 动态 import 的 extractor 子模块（返回 datas, binaries, hiddenimports 三元组）
+BUNDLE_FFMPEG = os.environ.get("HLS_BUNDLE_FFMPEG", "1").strip().lower() not in {"0", "false", "no"}
+
+# 防复发：PyInstaller 不清 dist 下同名旧目录，旧产物会与新构建叠加出嵌套镜像
+shutil.rmtree(Path(DISTPATH) / "hls_download", ignore_errors=True)
+
+# ffmpeg.exe + ffprobe.exe：优先项目目录，否则上级目录（与 hls_download._find_ffmpeg_dir 的搜索一致）
+FFMPEG_BIN = next(ROOT.glob("ffmpeg*/bin/ffmpeg.exe"), None) if BUNDLE_FFMPEG else None
+if BUNDLE_FFMPEG and FFMPEG_BIN is None:
+    FFMPEG_BIN = next(ROOT.parent.glob("ffmpeg*/bin/ffmpeg.exe"), None)
+FFMPEG_DIR = FFMPEG_BIN.parent if FFMPEG_BIN else None
+FFPROBE_BIN = FFMPEG_DIR / "ffprobe.exe" if FFMPEG_DIR else None
+if BUNDLE_FFMPEG and (FFMPEG_BIN is None or FFPROBE_BIN is None or not FFPROBE_BIN.is_file()):
+    raise SystemExit("Bundled build requested, but ffmpeg.exe/ffprobe.exe were not found.")
+
+# 保留 yt-dlp 完整动态 extractor 集合，避免站点支持因激进裁剪而回归。
 _yt_datas, _yt_binaries, _yt_hidden = collect_all("yt_dlp")
+binaries = list(_yt_binaries)
+if FFMPEG_BIN:
+    binaries.append((str(FFMPEG_BIN), "ffmpeg/bin"))
+if FFPROBE_BIN:
+    binaries.append((str(FFPROBE_BIN), "ffmpeg/bin"))
 
 a = Analysis(
-    ["hls_download.py"],
+    [str(ROOT / "hls_download.py")],
     pathex=[str(ROOT), str(YTDLP_LIB)],
-    binaries=(
-        [(str(FFMPEG_BIN), "ffmpeg/bin")] if FFMPEG_BIN else []
-    ) + (
-        [(str(FFPROBE_BIN), "ffmpeg/bin")] if FFPROBE_BIN else []
-    ),
+    binaries=binaries,
     datas=_yt_datas,
     hiddenimports=_yt_hidden,
     hookspath=[],
@@ -41,8 +44,6 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
-# yt-dlp 的动态库（含 extractor 依赖的二进制）
-a.binaries += _yt_binaries
 
 pyz = PYZ(a.pure)
 
@@ -58,8 +59,8 @@ exe = EXE(
     upx=False,
     console=True,
     disable_windowed_traceback=False,
-    icon="app.ico",
-    version="version_info.txt",
+    icon=str(ROOT / "app.ico"),
+    version=str(ROOT / "version_info.txt"),
 )
 
 coll = COLLECT(
@@ -70,7 +71,3 @@ coll = COLLECT(
     upx=False,
     name="hls_download",
 )
-
-# 打包完成后清理 PyInstaller 中间产物目录 build/（只留 dist/ 成品）
-shutil.rmtree(ROOT / "build", ignore_errors=True)
-
